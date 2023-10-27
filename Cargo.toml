@@ -8,4 +8,5 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.75"
 clap = { version = "4.4.7", features = ["derive"] }
+nalgebra = "0.32.3"
 stl_io = "0.7.0"

@@ -1,9 +1,11 @@
+use nalgebra as na;
+use na::Vector3;
 use stl_io::{IndexedMesh, IndexedTriangle};
 
-use crate::vector::Vector;
+use crate::utils::{to_na, from_na};
 
 pub fn tesselate(input: IndexedMesh, max_edge_len: f32) -> IndexedMesh {
-    let mut vertices: Vec<Vector> = input.vertices.into_iter().map(Vector::from).collect();
+    let mut vertices: Vec<Vector3<f32>> = input.vertices.into_iter().map(to_na).collect();
     let mut divided_triangles: Vec<IndexedTriangle> = vec![];
 
     // Recursively divide triangles using depth-first search
@@ -49,7 +51,7 @@ pub fn tesselate(input: IndexedMesh, max_edge_len: f32) -> IndexedMesh {
     }
 
     IndexedMesh {
-        vertices: vertices.into_iter().map(Vector::into).collect(),
+        vertices: vertices.into_iter().map(from_na).collect(),
         faces: divided_triangles
     }
 }
