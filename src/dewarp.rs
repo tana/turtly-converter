@@ -140,7 +140,7 @@ fn interpolate(from: &Vector4<f32>, to: &Vector4<f32>, max_step: f32) -> Vec<Vec
     let distance = (to.xyz() - from.xyz()).norm();
     let div = ((distance / max_step).floor() as usize).max(1);
 
-    (0..=div).map(move |i| {
+    (1..=div).map(move |i| {
         let t = (i as f32) / (div as f32);
         from.lerp(&to, t)
     }).collect()
