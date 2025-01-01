@@ -10,29 +10,21 @@ use clap::Args;
 use na::{vector, Vector3, Vector4};
 use nalgebra as na;
 
-use crate::utils::parse_vector;
 use crate::{
     gcode::{
         command::{Command, G0, G1, G92},
         parser::parse_line,
     },
-    transform::{Transform, TransformType},
+    transform::Transform,
 };
+use crate::utils::parse_vector;
 
 const DEFAULT_MAX_LINE_LEN: f32 = 1.0; // 1 mm
 
 #[derive(Args)]
 pub struct DewarpArgs {
     input_file: OsString,
-    #[arg(
-        short = 't',
-        long = "type",
-        value_enum,
-        requires_if("conical", "slope_angle")
-    )]
-    transform_type: TransformType,
-    #[arg(short, long)]
-    slope_angle: f32,
+    transform_file: OsString,
     #[arg(short, long, value_parser = parse_vector)]
     center: Vector3<f32>,
     #[arg(short, long, default_value_t = DEFAULT_MAX_LINE_LEN)]
@@ -45,6 +37,10 @@ pub fn command_main(args: DewarpArgs) -> Result<()> {
     let input_path = Path::new(&args.input_file);
     let input_file = File::open(input_path)?;
 
+    let transform_file_path = Path::new(&args.transform_file);
+    let transform_file = File::open(transform_file_path)?;
+    let transform = serde_json::de::from_reader(transform_file)?;
+
     let mut default_output_path = input_path.to_owned();
     default_output_path.set_extension("dewarped.gcode");
 
@@ -52,12 +48,6 @@ pub fn command_main(args: DewarpArgs) -> Result<()> {
         args.output_file
             .unwrap_or(default_output_path.as_os_str().to_owned()),
     )?;
-
-    let transform = match args.transform_type {
-        TransformType::Conical => Transform::Conical {
-            slope_angle: args.slope_angle * std::f32::consts::PI / 180.0,
-        },
-    };
 
     dewarp_gcode(
         input_file,

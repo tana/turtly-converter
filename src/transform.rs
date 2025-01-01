@@ -1,13 +1,14 @@
 use clap::ValueEnum;
 use na::{vector, Vector3};
 use nalgebra as na;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
 pub enum TransformType {
     Conical,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum Transform {
     Conical { slope_angle: f32 },
 }

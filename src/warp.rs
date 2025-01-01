@@ -47,14 +47,19 @@ pub fn command_main(args: WarpArgs) -> Result<()> {
 
     let mut default_output_path = input_path.to_owned();
     default_output_path.set_extension("warped.stl");
+    let output_path = match args.output_file {
+        Some(output_path) => output_path.into(),
+        None => default_output_path
+    };
 
-    let mut output_file = File::create(
-        args.output_file
-            .unwrap_or(default_output_path.as_os_str().to_owned()),
-    )?;
+    let mut transform_file_path = input_path.to_owned();
+    transform_file_path.set_extension("transform.json");
+
+    let mut output_file = File::create(output_path)?;
     stl_io::write_stl(&mut output_file, unindex_mesh(warped_mesh).iter())?;
 
-    println!("Dewarp options: --slope-angle={}", args.slope_angle);
+    let transform_file = File::create(transform_file_path)?;
+    serde_json::to_writer(transform_file, &transform)?;
 
     Ok(())
 }
