@@ -1,6 +1,6 @@
-use nalgebra as na;
-use na::vector;
 use anyhow::Result;
+use na::vector;
+use nalgebra as na;
 
 pub fn to_na(v: stl_io::Vector<f32>) -> na::Vector3<f32> {
     vector![v[0], v[1], v[2]]

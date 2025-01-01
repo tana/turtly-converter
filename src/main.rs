@@ -1,14 +1,14 @@
-mod warp;
 mod dewarp;
+mod gcode;
 mod tessellation;
 mod transform;
-mod gcode;
 mod utils;
+mod warp;
 
-use clap::{Parser, Subcommand};
-use warp::WarpArgs;
-use dewarp::DewarpArgs;
 use anyhow::Result;
+use clap::{Parser, Subcommand};
+use dewarp::DewarpArgs;
+use warp::WarpArgs;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -20,7 +20,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     Warp(WarpArgs),
-    Dewarp(DewarpArgs)
+    Dewarp(DewarpArgs),
 }
 
 fn main() -> Result<()> {

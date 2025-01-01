@@ -1,9 +1,8 @@
 //! G-code commands.
-//! 
+//!
 //! Refernence:
 //! - https://reprap.org/wiki/G-code
 //! - https://marlinfw.org/meta/gcode/
-
 
 /// A macro for easily defining commands with many optional fields
 macro_rules! def_command {
@@ -114,13 +113,13 @@ pub enum Command {
     #[allow(dead_code)]
     M1001(M1001),
     #[allow(dead_code)]
-    M1002(M1002)
+    M1002(M1002),
 }
 
 #[cfg(test)]
 mod tests {
     def_command!(T0, "test", a: f32, b: f32);
-    
+
     #[test]
     fn single_cmd_create_and_set() {
         let cmd = T0::new().b(123.0);
@@ -132,7 +131,7 @@ mod tests {
     #[test]
     fn parse_args() {
         let (_, cmd) = T0::parse_args("A1 B-2.3").unwrap();
-        
+
         assert_eq!(cmd.a, Some(1.0));
         assert_eq!(cmd.b, Some(-2.3));
     }
