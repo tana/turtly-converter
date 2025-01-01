@@ -10,11 +10,11 @@ pub enum TransformType {
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum Transform {
-    Conical { slope_angle: f32 },
+    Conical { slope_angle: f64 },
 }
 
 impl Transform {
-    pub fn apply(&self, point: Vector3<f32>) -> Vector3<f32> {
+    pub fn apply(&self, point: Vector3<f64>) -> Vector3<f64> {
         match self {
             &Transform::Conical { slope_angle } => {
                 let s = slope_angle.tan();
@@ -27,7 +27,7 @@ impl Transform {
         }
     }
 
-    pub fn apply_inverse(&self, point: Vector3<f32>) -> Vector3<f32> {
+    pub fn apply_inverse(&self, point: Vector3<f64>) -> Vector3<f64> {
         match self {
             &Transform::Conical { slope_angle } => {
                 let s = slope_angle.tan();

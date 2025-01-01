@@ -13,7 +13,7 @@ use nom::{
 
 use super::command::{Command, G0, G1, G92, M1001, M1002};
 
-pub(crate) fn parse_float_arg(input: &str) -> IResult<&str, f32> {
+pub(crate) fn parse_float_arg(input: &str) -> IResult<&str, f64> {
     map(
         recognize(tuple((
             opt(parse_sign),
@@ -22,7 +22,7 @@ pub(crate) fn parse_float_arg(input: &str) -> IResult<&str, f32> {
                 recognize(digit1),
             )),
         ))),
-        |s| f32::from_str(s).unwrap(),
+        |s| f64::from_str(s).unwrap(),
     )(input) // from_str will succeed
 }
 

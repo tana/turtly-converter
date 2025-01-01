@@ -93,9 +93,9 @@ macro_rules! def_command {
     }
 }
 
-def_command!(G0, "Rapid move", x: f32, y: f32, z: f32, c: f32, e: f32, f: f32);
-def_command!(G1, "Linear move", x: f32, y: f32, z: f32, c: f32, e: f32, f: f32);
-def_command!(G92, "Set position", x: f32, y: f32, z: f32, e: f32);
+def_command!(G0, "Rapid move", x: f64, y: f64, z: f64, c: f64, e: f64, f: f64);
+def_command!(G1, "Linear move", x: f64, y: f64, z: f64, c: f64, e: f64, f: f64);
+def_command!(G92, "Set position", x: f64, y: f64, z: f64, e: f64);
 // There is a 3D printer which use M1001 and M1002 to signal beginning and ending of start/end macros
 //  https://www.ideamaker.io/dictionaryDetail.html?name=End%20of%20Start%20Gcode&category_name=Printer%20Settings
 def_command!(M1001, "Enable dewarping");
@@ -118,7 +118,7 @@ pub enum Command {
 
 #[cfg(test)]
 mod tests {
-    def_command!(T0, "test", a: f32, b: f32);
+    def_command!(T0, "test", a: f64, b: f64);
 
     #[test]
     fn single_cmd_create_and_set() {

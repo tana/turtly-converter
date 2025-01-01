@@ -19,16 +19,16 @@ use crate::{
 };
 use crate::utils::parse_vector;
 
-const DEFAULT_MAX_LINE_LEN: f32 = 1.0; // 1 mm
+const DEFAULT_MAX_LINE_LEN: f64 = 1.0; // 1 mm
 
 #[derive(Args)]
 pub struct DewarpArgs {
     input_file: OsString,
     transform_file: OsString,
     #[arg(short, long, value_parser = parse_vector)]
-    center: Vector3<f32>,
+    center: Vector3<f64>,
     #[arg(short, long, default_value_t = DEFAULT_MAX_LINE_LEN)]
-    max_line_len: f32,
+    max_line_len: f64,
     #[arg(short, long)]
     output_file: Option<OsString>,
 }
@@ -64,8 +64,8 @@ fn dewarp_gcode(
     input_file: File,
     output_file: File,
     transform: Transform,
-    center: Vector3<f32>,
-    max_line_len: f32,
+    center: Vector3<f64>,
+    max_line_len: f64,
 ) -> Result<()> {
     let mut writer = BufWriter::new(output_file);
 
@@ -170,17 +170,17 @@ fn dewarp_gcode(
     Ok(())
 }
 
-fn dewarp_point(point: Vector3<f32>, transform: Transform, center: Vector3<f32>) -> Vector3<f32> {
+fn dewarp_point(point: Vector3<f64>, transform: Transform, center: Vector3<f64>) -> Vector3<f64> {
     transform.apply_inverse(point - center) + center
 }
 
-fn interpolate(from: &Vector4<f32>, to: &Vector4<f32>, max_step: f32) -> Vec<Vector4<f32>> {
+fn interpolate(from: &Vector4<f64>, to: &Vector4<f64>, max_step: f64) -> Vec<Vector4<f64>> {
     let distance = (to.xyz() - from.xyz()).norm();
     let div = ((distance / max_step).floor() as usize).max(1);
 
     (1..=div)
         .map(move |i| {
-            let t = (i as f32) / (div as f32);
+            let t = (i as f64) / (div as f64);
             from.lerp(&to, t)
         })
         .collect()
