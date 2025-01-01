@@ -5,7 +5,7 @@ use anyhow::Result;
 use na::{Vector3, vector, Vector4};
 use nalgebra as na;
 
-use crate::gcode::{parser::parse_line, command::{Command, G0, G1, G92}};
+use crate::{gcode::{command::{Command, G0, G1, G92}, parser::parse_line}, transform::{Transform, TransformType}};
 use crate::utils::parse_vector;
 
 const DEFAULT_MAX_LINE_LEN: f32 = 1.0;    // 1 mm
@@ -13,6 +13,8 @@ const DEFAULT_MAX_LINE_LEN: f32 = 1.0;    // 1 mm
 #[derive(Args)]
 pub struct DewarpArgs {
     input_file: OsString,
+    #[arg(short = 't', long = "type", value_enum, requires_if("conical", "slope_angle"))]
+    transform_type: TransformType,
     #[arg(short, long)]
     slope_angle: f32,
     #[arg(short, long, value_parser = parse_vector)]
@@ -32,12 +34,16 @@ pub fn command_main(args: DewarpArgs) -> Result<()> {
 
     let output_file = File::create(args.output_file.unwrap_or(default_output_path.as_os_str().to_owned()))?;
 
-    dewarp_gcode(input_file, output_file, args.slope_angle * std::f32::consts::PI / 180.0, args.center, args.max_line_len)?;
+    let transform = match args.transform_type {
+        TransformType::Conical => Transform::Conical { slope_angle: args.slope_angle * std::f32::consts::PI / 180.0},
+    };
+
+    dewarp_gcode(input_file, output_file, transform, args.center, args.max_line_len)?;
 
     Ok(())
 }
 
-fn dewarp_gcode(input_file: File, output_file: File, slope_angle: f32, center: Vector3<f32>, max_line_len: f32) -> Result<()> {
+fn dewarp_gcode(input_file: File, output_file: File, transform: Transform, center: Vector3<f32>, max_line_len: f32) -> Result<()> {
     let mut writer = BufWriter::new(output_file);
 
     let mut enabled = false;
@@ -59,7 +65,8 @@ fn dewarp_gcode(input_file: File, output_file: File, slope_angle: f32, center: V
                     if enabled {
                         // Split movement into short parts because it may be nonlinear after dewarping
                         for p in interpolate(&last_pos, &pos, max_line_len) {
-                            let dewarped = dewarp_point(p.xyz(), slope_angle, center);
+                            let dewarped = dewarp_point(p.xyz(), transform, center);
+
                             let z = dewarped.z.max(0.0);    // Workaround for initial moves
                             writeln!(
                                 &mut writer, "{}",
@@ -83,7 +90,7 @@ fn dewarp_gcode(input_file: File, output_file: File, slope_angle: f32, center: V
                     if enabled {
                         // Split movement into short parts because it may be nonlinear after dewarping
                         for p in interpolate(&last_pos, &pos, max_line_len) {
-                            let dewarped = dewarp_point(p.xyz(), slope_angle, center);
+                            let dewarped = dewarp_point(p.xyz(), transform, center);
                             let z = dewarped.z.max(0.0);    // Workaround for initial moves
                             writeln!(
                                 &mut writer, "{}",
@@ -124,15 +131,8 @@ fn dewarp_gcode(input_file: File, output_file: File, slope_angle: f32, center: V
     Ok(())
 }
 
-fn dewarp_point(point: Vector3<f32>, slope_angle: f32, center: Vector3<f32>) -> Vector3<f32> {
-    let point = point - center;
-    let s = slope_angle.tan();
-
-    vector![
-        point.x,
-        point.y,
-        point.z - s * (point.x * point.x + point.y * point.y).sqrt()
-    ] + center
+fn dewarp_point(point: Vector3<f32>, transform: Transform, center: Vector3<f32>) -> Vector3<f32> {
+    transform.apply_inverse(point - center) + center
 }
 
 fn interpolate(from: &Vector4<f32>, to: &Vector4<f32>, max_step: f32) -> Vec<Vector4<f32>>
