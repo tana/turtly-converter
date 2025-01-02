@@ -2,15 +2,18 @@ use clap::ValueEnum;
 use na::{vector, Vector3};
 use nalgebra as na;
 use serde::{Deserialize, Serialize};
+use std::f64::consts::PI;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
 pub enum TransformType {
     Conical,
+    Sinusoidal,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum Transform {
     Conical { slope_angle: f64 },
+    Sinusoidal { height: f64, pitch: f64 },
 }
 
 impl Transform {
@@ -24,6 +27,16 @@ impl Transform {
                     point.z + s * (point.x * point.x + point.y * point.y).sqrt()
                 ]
             }
+            &Transform::Sinusoidal { height, pitch } => {
+                vector![
+                    point.x,
+                    point.y,
+                    point.z
+                        + height
+                            * (2.0 * PI * point.x / pitch).sin()
+                            * (2.0 * PI * point.y / pitch).cos()
+                ]
+            }
         }
     }
 
@@ -35,6 +48,16 @@ impl Transform {
                     point.x,
                     point.y,
                     point.z - s * (point.x * point.x + point.y * point.y).sqrt()
+                ]
+            }
+            &Transform::Sinusoidal { height, pitch } => {
+                vector![
+                    point.x,
+                    point.y,
+                    point.z
+                        - height
+                            * (2.0 * PI * point.x / pitch).sin()
+                            * (2.0 * PI * point.y / pitch).cos()
                 ]
             }
         }

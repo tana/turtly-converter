@@ -15,6 +15,8 @@ use crate::{
 const DEFAULT_MAX_EDGE_LEN: f64 = 1.0; // 1 mm
 const DEFAULT_TYPE: TransformType = TransformType::Conical;
 const DEFAULT_SLOPE_ANGLE: f64 = 30.0; // degrees
+const DEFAULT_HEIGHT: f64 = 2.0; // mm
+const DEFAULT_PITCH: f64 = 10.0; // mm
 
 #[derive(Args)]
 pub struct WarpArgs {
@@ -27,6 +29,10 @@ pub struct WarpArgs {
     transform_type: TransformType,
     #[arg(short, long, default_value_t = DEFAULT_SLOPE_ANGLE)]
     slope_angle: f64,
+    #[arg(short = 'H', long, default_value_t = DEFAULT_HEIGHT)]
+    height: f64,
+    #[arg(short, long, default_value_t = DEFAULT_PITCH)]
+    pitch: f64,
 }
 
 pub fn command_main(args: WarpArgs) -> Result<()> {
@@ -38,6 +44,10 @@ pub fn command_main(args: WarpArgs) -> Result<()> {
     let transform = match args.transform_type {
         TransformType::Conical => Transform::Conical {
             slope_angle: args.slope_angle * std::f64::consts::PI / 180.0,
+        },
+        TransformType::Sinusoidal => Transform::Sinusoidal {
+            height: args.height,
+            pitch: args.pitch,
         },
     };
 
