@@ -33,8 +33,10 @@ impl Transform {
                     point.y,
                     point.z
                         + height
-                            * (2.0 * PI * point.x / pitch).sin()
-                            * (2.0 * PI * point.y / pitch).cos()
+                            * ((2.0 * PI * point.x / pitch).sin()
+                                * (2.0 * PI * point.y / pitch).cos()
+                                + 1.0)
+                            / 2.0
                 ]
             }
         }
@@ -56,8 +58,10 @@ impl Transform {
                     point.y,
                     point.z
                         - height
-                            * (2.0 * PI * point.x / pitch).sin()
-                            * (2.0 * PI * point.y / pitch).cos()
+                            * ((2.0 * PI * point.x / pitch).sin()
+                                * (2.0 * PI * point.y / pitch).cos()
+                                + 1.0)
+                            / 2.0
                 ]
             }
         }
