@@ -20,7 +20,7 @@ pub fn tesselate(input: Mesh, max_edge_len: f64) -> Mesh {
         // Terminate when all triangles are small enough
         if triangles
             .iter()
-            .all(|triangle| triangle_needs_division(triangle, &vertices, max_edge_len))
+            .all(|triangle| triangle_small_enough(triangle, &vertices, max_edge_len))
         {
             break;
         }
@@ -63,7 +63,7 @@ pub fn tesselate(input: Mesh, max_edge_len: f64) -> Mesh {
     }
 }
 
-fn triangle_needs_division(
+fn triangle_small_enough(
     triangle: &[usize; 3],
     vertices: &Vec<Vector3<f64>>,
     max_edge_len: f64,
