@@ -83,7 +83,8 @@ fn dewarp_gcode(
 
         if let Ok((_, Some(cmd))) = parse_line(&line) {
             match cmd {
-                Command::G0(cmd @ G0 { x, y, z, e, .. }) => {
+                Command::G0(G0 { x, y, z, e, .. })
+                | Command::G1(G1 { x, y, z, e, .. }) => {
                     let pos = vector![
                         x.unwrap_or(last_pos.x),
                         y.unwrap_or(last_pos.y),
@@ -98,51 +99,33 @@ fn dewarp_gcode(
                             let dewarped = dewarp_point(p.xyz(), transform, center);
 
                             let z = dewarped.z.max(0.0); // Workaround for initial moves
-                            writeln!(
-                                &mut writer,
-                                "{}",
-                                (G0 {
-                                    x: Some(dewarped.x),
-                                    y: Some(dewarped.y),
-                                    z: Some(z),
-                                    e: Some(p[3]),
-                                    ..cmd
-                                })
-                                .to_string()
-                            )?;
-                        }
-                    } else {
-                        writeln!(&mut writer, "{}", line)?;
-                    }
-
-                    last_pos = pos;
-                }
-                Command::G1(cmd @ G1 { x, y, z, e, .. }) => {
-                    let pos = vector![
-                        x.unwrap_or(last_pos.x),
-                        y.unwrap_or(last_pos.y),
-                        z.map(|z| if enabled { z + z_offset } else { z })
-                            .unwrap_or(last_pos.z),
-                        e.unwrap_or(last_pos[3])
-                    ];
-
-                    if enabled {
-                        // Split movement into short parts because it may be nonlinear after dewarping
-                        for p in interpolate(&last_pos, &pos, max_line_len) {
-                            let dewarped = dewarp_point(p.xyz(), transform, center);
-                            let z = dewarped.z.max(0.0); // Workaround for initial moves
-                            writeln!(
-                                &mut writer,
-                                "{}",
-                                (G1 {
-                                    x: Some(dewarped.x),
-                                    y: Some(dewarped.y),
-                                    z: Some(z),
-                                    e: Some(p[3]),
-                                    ..cmd
-                                })
-                                .to_string()
-                            )?;
+                            match cmd {
+                                Command::G0(ref cmd) => writeln!(
+                                    &mut writer,
+                                    "{}",
+                                    (G0 {
+                                        x: Some(dewarped.x),
+                                        y: Some(dewarped.y),
+                                        z: Some(z),
+                                        e: Some(p[3]),
+                                        ..cmd.clone()
+                                    })
+                                    .to_string()
+                                )?,
+                                Command::G1(ref cmd) => writeln!(
+                                    &mut writer,
+                                    "{}",
+                                    (G1 {
+                                        x: Some(dewarped.x),
+                                        y: Some(dewarped.y),
+                                        z: Some(z),
+                                        e: Some(p[3]),
+                                        ..cmd.clone()
+                                    })
+                                    .to_string()
+                                )?,
+                                _ => unreachable!()
+                            }
                         }
                     } else {
                         writeln!(&mut writer, "{}", line)?;
