@@ -14,14 +14,14 @@ use clap::Args;
 use na::{vector, Vector3, Vector4};
 use nalgebra as na;
 
+use crate::utils::parse_vector;
 use crate::{
     gcode::{
         command::{Command, G0, G1, G92},
         parser::parse_line,
     },
-    transform::Transform,
+    transform::{Transform, TransformData},
 };
-use crate::utils::parse_vector;
 
 const DEFAULT_MAX_LINE_LEN: f64 = 1.0; // 1 mm
 
@@ -43,7 +43,10 @@ pub fn command_main(args: DewarpArgs) -> Result<()> {
 
     let transform_file_path = Path::new(&args.transform_file);
     let transform_file = File::open(transform_file_path)?;
-    let transform = serde_json::de::from_reader(transform_file)?;
+    let TransformData {
+        transform,
+        warped_aabb,
+    } = serde_json::de::from_reader(transform_file)?;
 
     let mut default_output_path = input_path.to_owned();
     default_output_path.set_extension("dewarped.gcode");
@@ -59,6 +62,7 @@ pub fn command_main(args: DewarpArgs) -> Result<()> {
         transform,
         args.center,
         args.max_line_len,
+        warped_aabb.origin.z,
     )?;
 
     Ok(())
@@ -70,6 +74,7 @@ fn dewarp_gcode(
     transform: Transform,
     center: Vector3<f64>,
     max_line_len: f64,
+    z_offset: f64,
 ) -> Result<()> {
     let mut writer = BufWriter::new(output_file);
 
@@ -85,7 +90,8 @@ fn dewarp_gcode(
                     let pos = vector![
                         x.unwrap_or(last_pos.x),
                         y.unwrap_or(last_pos.y),
-                        z.unwrap_or(last_pos.z),
+                        z.map(|z| if enabled { z + z_offset } else { z })
+                            .unwrap_or(last_pos.z),
                         e.unwrap_or(last_pos[3])
                     ];
 
@@ -118,7 +124,8 @@ fn dewarp_gcode(
                     let pos = vector![
                         x.unwrap_or(last_pos.x),
                         y.unwrap_or(last_pos.y),
-                        z.unwrap_or(last_pos.z),
+                        z.map(|z| if enabled { z + z_offset } else { z })
+                            .unwrap_or(last_pos.z),
                         e.unwrap_or(last_pos[3])
                     ];
 

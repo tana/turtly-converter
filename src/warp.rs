@@ -12,8 +12,8 @@ use stl_io::{IndexedMesh, Triangle};
 
 use crate::{
     tessellation::tesselate,
-    transform::{Transform, TransformType},
-    utils::Mesh,
+    transform::{Transform, TransformData, TransformType},
+    utils::{Aabb, Mesh},
 };
 
 const DEFAULT_MAX_EDGE_LEN: f64 = 1.0; // 1 mm
@@ -42,7 +42,7 @@ pub struct WarpArgs {
 pub fn command_main(args: WarpArgs) -> Result<()> {
     let input_path = Path::new(&args.input_file);
     let input_mesh = stl_io::read_stl(&mut File::open(input_path)?)?.into();
-    let (origin, size) = calc_aabb(&input_mesh);
+    let Aabb { origin, size } = calc_aabb(&input_mesh);
     let center = vector![origin.x + size.x / 2.0, origin.y + size.y / 2.0, origin.z];
 
     let transform = match args.transform_type {
@@ -59,6 +59,8 @@ pub fn command_main(args: WarpArgs) -> Result<()> {
 
     let warped_mesh = warp_mesh(tesselated_mesh, transform, center);
 
+    let warped_aabb = calc_aabb(&warped_mesh);
+
     let mut default_output_path = input_path.to_owned();
     default_output_path.set_extension("warped.stl");
     let output_path = match args.output_file {
@@ -73,7 +75,13 @@ pub fn command_main(args: WarpArgs) -> Result<()> {
     stl_io::write_stl(&mut output_file, unindex_stl(warped_mesh.into()).iter())?;
 
     let transform_file = File::create(transform_file_path)?;
-    serde_json::to_writer(transform_file, &transform)?;
+    serde_json::to_writer(
+        transform_file,
+        &TransformData {
+            transform,
+            warped_aabb,
+        },
+    )?;
 
     Ok(())
 }
@@ -88,7 +96,7 @@ fn unindex_stl(mesh: IndexedMesh) -> Vec<Triangle> {
         .collect()
 }
 
-fn calc_aabb(input: &Mesh) -> (Vector3<f64>, Vector3<f64>) {
+fn calc_aabb(input: &Mesh) -> Aabb {
     let mut min = Vector3::from_element(std::f64::MAX);
     let mut max = Vector3::from_element(std::f64::MIN);
 
@@ -97,7 +105,10 @@ fn calc_aabb(input: &Mesh) -> (Vector3<f64>, Vector3<f64>) {
         max = max.map_with_location(|i, _, e: f64| e.max(vert[i]));
     }
 
-    (min, max - min)
+    Aabb {
+        origin: min,
+        size: max - min,
+    }
 }
 
 fn warp_mesh(input: Mesh, transform: Transform, center: Vector3<f64>) -> Mesh {

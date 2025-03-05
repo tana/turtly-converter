@@ -5,6 +5,13 @@
 use anyhow::Result;
 use na::vector;
 use nalgebra as na;
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct Aabb {
+    pub origin: na::Vector3<f64>,
+    pub size: na::Vector3<f64>,
+}
 
 pub struct Mesh {
     pub vertices: Vec<na::Vector3<f64>>,

@@ -8,6 +8,14 @@ use nalgebra as na;
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 
+use crate::utils::Aabb;
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct TransformData {
+    pub transform: Transform,
+    pub warped_aabb: Aabb,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
 pub enum TransformType {
     Conical,
