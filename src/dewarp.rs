@@ -14,7 +14,7 @@ use clap::Args;
 use na::{vector, Vector3, Vector4};
 use nalgebra as na;
 
-use crate::utils::parse_vector;
+use crate::gcode::command::BEGIN_DEWARP;
 use crate::{
     gcode::{
         command::{Command, G0, G1, G92},
@@ -29,8 +29,6 @@ const DEFAULT_MAX_LINE_LEN: f64 = 1.0; // 1 mm
 pub struct DewarpArgs {
     input_file: OsString,
     transform_file: OsString,
-    #[arg(short, long, value_parser = parse_vector)]
-    center: Vector3<f64>,
     #[arg(short, long, default_value_t = DEFAULT_MAX_LINE_LEN)]
     max_line_len: f64,
     #[arg(short, long)]
@@ -60,7 +58,6 @@ pub fn command_main(args: DewarpArgs) -> Result<()> {
         input_file,
         output_file,
         transform,
-        args.center,
         args.max_line_len,
         warped_aabb.origin.z,
     )?;
@@ -72,13 +69,13 @@ fn dewarp_gcode(
     input_file: File,
     output_file: File,
     transform: Transform,
-    center: Vector3<f64>,
     max_line_len: f64,
     z_offset: f64,
 ) -> Result<()> {
     let mut writer = BufWriter::new(output_file);
 
     let mut enabled = false;
+    let mut center = Vector3::zeros();
     let mut last_pos = Vector4::zeros();
 
     for line in BufReader::new(input_file).lines() {
@@ -165,10 +162,11 @@ fn dewarp_gcode(
 
                     last_pos = pos;
                 }
-                Command::M1001(_) => {
+                Command::BEGIN_DEWARP(BEGIN_DEWARP { x, y }) => {
                     enabled = true;
+                    center = vector![x.unwrap_or(0.0) / 2.0, y.unwrap_or(0.0) / 2.0, 0.0];
                 }
-                Command::M1002(_) => {
+                Command::END_DEWARP(_) => {
                     enabled = false;
                 }
             }

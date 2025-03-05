@@ -13,7 +13,7 @@ macro_rules! def_command {
     ($cmd_name:ident, $doc_str:literal $(, $field_name:ident : $field_type:ty)*) => {
         #[doc = $doc_str]
         #[derive(Debug, Default, Clone)]
-        #[allow(dead_code)]
+        #[allow(dead_code, non_camel_case_types)]
         pub struct $cmd_name {
             $(
                 pub $field_name: Option<$field_type>,
@@ -102,8 +102,8 @@ def_command!(G1, "Linear move", x: f64, y: f64, z: f64, c: f64, e: f64, f: f64);
 def_command!(G92, "Set position", x: f64, y: f64, z: f64, e: f64);
 // There is a 3D printer which use M1001 and M1002 to signal beginning and ending of start/end macros
 //  https://www.ideamaker.io/dictionaryDetail.html?name=End%20of%20Start%20Gcode&category_name=Printer%20Settings
-def_command!(M1001, "Enable dewarping");
-def_command!(M1002, "Disable dewarping");
+def_command!(BEGIN_DEWARP, "Enable dewarping", x: f64, y: f64);
+def_command!(END_DEWARP, "Disable dewarping");
 
 /// A single G-code command.
 #[derive(Debug, Clone)]
@@ -114,10 +114,10 @@ pub enum Command {
     G1(G1),
     #[allow(dead_code)]
     G92(G92),
-    #[allow(dead_code)]
-    M1001(M1001),
-    #[allow(dead_code)]
-    M1002(M1002),
+    #[allow(dead_code, non_camel_case_types)]
+    BEGIN_DEWARP(BEGIN_DEWARP),
+    #[allow(dead_code, non_camel_case_types)]
+    END_DEWARP(END_DEWARP),
 }
 
 #[cfg(test)]

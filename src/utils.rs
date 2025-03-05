@@ -56,6 +56,7 @@ pub fn from_na(v: na::Vector3<f64>) -> stl_io::Vector<f32> {
     stl_io::Vector::new([v.x as f32, v.y as f32, v.z as f32])
 }
 
+#[allow(dead_code)]
 pub fn parse_vector(s: &str) -> Result<na::Vector3<f64>> {
     let mut numbers = s.split(",").map(|e| e.parse::<f64>());
 

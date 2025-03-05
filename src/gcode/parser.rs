@@ -3,7 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use core::str::FromStr;
-use nom::character::complete::{alpha1, char, digit0, digit1, not_line_ending, space0};
+use nom::character::complete::{
+    char, digit0, digit1, not_line_ending, satisfy, space0,
+};
+use nom::multi::many0;
 use nom::IResult;
 use nom::{
     branch::alt,
@@ -15,7 +18,7 @@ use nom::{
     Err,
 };
 
-use super::command::{Command, G0, G1, G92, M1001, M1002};
+use super::command::{Command, BEGIN_DEWARP, END_DEWARP, G0, G1, G92};
 
 pub(crate) fn parse_float_arg(input: &str) -> IResult<&str, f64> {
     map(
@@ -34,15 +37,22 @@ fn parse_sign(input: &str) -> IResult<&str, &str> {
     recognize(alt((char('+'), char('-'))))(input)
 }
 
+fn parse_cmd_name(input: &str) -> IResult<&str, &str> {
+    recognize(pair(
+        satisfy(|c| c.is_alphabetic() | (c == '_')),
+        many0(satisfy(|c| c.is_alphanumeric() | (c == '_'))),
+    ))(input)
+}
+
 fn parse_command(input: &str) -> IResult<&str, Command> {
-    let (cmd_rest, cmd) = recognize(pair(alpha1, digit1))(input)?;
+    let (cmd_rest, cmd) = parse_cmd_name(input)?;
 
     match cmd {
         "G0" => map(G0::parse_args, Command::G0)(cmd_rest),
         "G1" => map(G1::parse_args, Command::G1)(cmd_rest),
         "G92" => map(G92::parse_args, Command::G92)(cmd_rest),
-        "M1001" => map(M1001::parse_args, Command::M1001)(cmd_rest),
-        "M1002" => map(M1002::parse_args, Command::M1002)(cmd_rest),
+        "BEGIN_DEWARP" => map(BEGIN_DEWARP::parse_args, Command::BEGIN_DEWARP)(cmd_rest),
+        "END_DEWARP" => map(END_DEWARP::parse_args, Command::END_DEWARP)(cmd_rest),
         _ => IResult::Err(Err::Error(Error::new(input, ErrorKind::Alpha))), // TODO:
     }
 }
