@@ -22,11 +22,11 @@ jobs:
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
-        target: ${{ matrix.config.target }}
+        target: ${{ matrix.config.triple }}
     - name: Build
-      run: cargo build --release --target ${{ matrix.config.target }}
-    - name: Upload a Build Artifact (exe)
+      run: cargo build --release --target ${{ matrix.config.triple }}
+    - name: Upload a Build Artifact
       uses: actions/upload-artifact@v4.6.1
       with:
-        name: executable_${{ matrix.config.target }}
-        path: target/${{ matrix.config.target }}/release/turtly-converter${{ matrix.config.exe_suffix }}
+        name: executable_${{ matrix.config.triple }}
+        path: target/${{ matrix.config.triple }}/release/turtly-converter${{ matrix.config.exe_suffix }}
