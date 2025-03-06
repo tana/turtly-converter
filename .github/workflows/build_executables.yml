@@ -1,0 +1,35 @@
+name: Build Executables
+
+on:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        target: [x86_64-pc-windows-msvc]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        target: ${{ matrix.target }}
+    - name: Build
+      run: cargo build --release --target ${{ matrix.target }}
+    - name: Upload a Build Artifact (exe)
+      uses: actions/upload-artifact@v4.6.1
+      with:
+        name: executable_${{ matrix.target }}
+        path: target/${{ matrix.target }}/release/turtly-converter.exe
+        if-no-files-found: ignore  # Fail on non-windows (non-exe) target
+    - name: Upload a Build Artifact
+      uses: actions/upload-artifact@v4.6.1
+      with:
+        name: executable_${{ matrix.target }}
+        path: target/${{ matrix.target }}/release/turtly-converter
