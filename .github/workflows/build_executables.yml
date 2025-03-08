@@ -2,7 +2,7 @@ name: Build Executables
 
 on:
   push:
-    branches: [main]
+    tags: v*
 
 env:
   CARGO_TERM_COLOR: always
