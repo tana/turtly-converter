@@ -17,17 +17,17 @@ jobs:
             exe_suffix: .exe
             name: x86_64-windows
           - triple: x86_64-apple-darwin
-            os: ubuntu-latest
+            os: macos-latest
             exe_suffix:
             name: x86_64-macos
           - triple: aarch64-apple-darwin
-            os: ubuntu-latest
+            os: macos-latest
             exe_suffix:
             name: aarch64-macos
           - triple: x86_64-unknown-linux-musl
             os: ubuntu-latest
             exe_suffix:
-            name: x86_64-linus
+            name: x86_64-linux
     runs-on: ${{ matrix.config.os }}
     steps:
     - name: Checkout
@@ -40,11 +40,13 @@ jobs:
       run: cargo build --release --target ${{ matrix.config.triple }}
       env:
         RUSTFLAGS: -C target-feature=+crt-static
+    - name: Rename executable
+      run: cp target/${{ matrix.config.triple }}/release/turtly-converter${{ matrix.config.exe_suffix }} turtly-converter${{ matrix.config.exe_suffix }}
     - name: Upload a Build Artifact
       uses: actions/upload-artifact@v4.6.1
       with:
         name: turtly-converter-${{ github.ref_name }}-${{ matrix.config.name }}
         path: |
-          target/${{ matrix.config.triple }}/release/turtly-converter${{ matrix.config.exe_suffix }}
+          turtly-converter${{ matrix.config.exe_suffix }}
           README.md
           LICENSE
