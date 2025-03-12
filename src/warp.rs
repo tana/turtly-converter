@@ -21,6 +21,7 @@ const DEFAULT_TYPE: TransformType = TransformType::Conical;
 const DEFAULT_SLOPE_ANGLE: f64 = 30.0; // degrees
 const DEFAULT_HEIGHT: f64 = 2.0; // mm
 const DEFAULT_PITCH: f64 = 10.0; // mm
+const DEFAULT_FLAT_BOTTOM: f64 = 0.0;  // mm
 
 #[derive(Args)]
 pub struct WarpArgs {
@@ -37,6 +38,8 @@ pub struct WarpArgs {
     height: f64,
     #[arg(short, long, default_value_t = DEFAULT_PITCH)]
     pitch: f64,
+    #[arg(long, default_value_t = DEFAULT_FLAT_BOTTOM)]
+    flat_bottom: f64,
 }
 
 pub fn command_main(args: WarpArgs) -> Result<()> {
@@ -48,10 +51,12 @@ pub fn command_main(args: WarpArgs) -> Result<()> {
     let transform = match args.transform_type {
         TransformType::Conical => Transform::Conical {
             slope_angle: args.slope_angle * std::f64::consts::PI / 180.0,
+            flat_bottom: args.flat_bottom,
         },
         TransformType::Sinusoidal => Transform::Sinusoidal {
             height: args.height,
             pitch: args.pitch,
+            flat_bottom: args.flat_bottom,
         },
     };
 

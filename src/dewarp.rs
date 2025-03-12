@@ -77,6 +77,7 @@ fn dewarp_gcode(
     let mut enabled = false;
     let mut center = Vector3::zeros();
     let mut last_pos = Vector4::zeros();
+    let mut corrected_e = 0.0;
 
     for line in BufReader::new(input_file).lines() {
         let line = line?;
@@ -94,9 +95,13 @@ fn dewarp_gcode(
                     ];
 
                     if enabled {
+                        let mut last_e = last_pos[3];
                         // Split movement into short parts because it may be nonlinear after dewarping
                         for p in interpolate(&last_pos, &pos, max_line_len) {
                             let dewarped = dewarp_point(p.xyz(), transform, center);
+                            // Correct extrusion length using the inverse of Jacobian determinant
+                            corrected_e += (p[3] - last_e) / extrusion_correction(p.xyz(), transform, center);
+                            last_e = p[3];
 
                             let z = dewarped.z.max(0.0); // Workaround for initial moves
                             match cmd {
@@ -107,7 +112,7 @@ fn dewarp_gcode(
                                         x: Some(dewarped.x),
                                         y: Some(dewarped.y),
                                         z: Some(z),
-                                        e: Some(p[3]),
+                                        e: Some(corrected_e),
                                         ..cmd.clone()
                                     })
                                     .to_string()
@@ -119,7 +124,7 @@ fn dewarp_gcode(
                                         x: Some(dewarped.x),
                                         y: Some(dewarped.y),
                                         z: Some(z),
-                                        e: Some(p[3]),
+                                        e: Some(corrected_e),
                                         ..cmd.clone()
                                     })
                                     .to_string()
@@ -140,6 +145,12 @@ fn dewarp_gcode(
                         z.unwrap_or(last_pos.z),
                         e.unwrap_or(last_pos[3])
                     ];
+
+                    // TODO:
+                    if pos[3].abs() > 0.0 {
+                        panic!("G92 to |E|>0 is currently not supported");
+                    }
+                    corrected_e = pos[3];
 
                     writeln!(&mut writer, "{}", line)?;
 
@@ -164,6 +175,10 @@ fn dewarp_gcode(
 
 fn dewarp_point(point: Vector3<f64>, transform: Transform, center: Vector3<f64>) -> Vector3<f64> {
     transform.apply_inverse(point - center) + center
+}
+
+fn extrusion_correction(point: Vector3<f64>, transform: Transform, center: Vector3<f64>) -> f64 {
+    transform.jacobian(transform.apply_inverse(point - center))
 }
 
 fn interpolate(from: &Vector4<f64>, to: &Vector4<f64>, max_step: f64) -> Vec<Vector4<f64>> {
