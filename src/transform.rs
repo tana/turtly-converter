@@ -25,10 +25,7 @@ pub enum TransformType {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum Transform {
     /// z' = z + tan(slope_angle)*sqrt(x^2 + y^2)
-    Conical {
-        slope_angle: f64,
-        flat_bottom: f64,
-    },
+    Conical { slope_angle: f64, flat_bottom: f64 },
     /// z' = z + height*(sin(2*π*x/pitch)*cos(2*π*y/pitch)+1)/2
     Sinusoidal {
         height: f64,
@@ -44,13 +41,12 @@ impl Transform {
                 slope_angle,
                 flat_bottom,
             } => {
-                let s = slope_angle.tan();
                 vector![
                     point.x,
                     point.y,
                     apply_flat_bottom(
                         point.z,
-                        s * (point.x * point.x + point.y * point.y).sqrt(),
+                        conical_offset(point.x, point.y, slope_angle),
                         flat_bottom
                     )
                 ]
@@ -65,11 +61,7 @@ impl Transform {
                     point.y,
                     apply_flat_bottom(
                         point.z,
-                        height
-                            * ((2.0 * PI * point.x / pitch).sin()
-                                * (2.0 * PI * point.y / pitch).cos()
-                                + 1.0)
-                            / 2.0,
+                        sinusoidal_offset(point.x, point.y, height, pitch),
                         flat_bottom
                     )
                 ]
@@ -83,13 +75,12 @@ impl Transform {
                 slope_angle,
                 flat_bottom,
             } => {
-                let s = slope_angle.tan();
                 vector![
                     point.x,
                     point.y,
                     apply_flat_bottom_inverse(
                         point.z,
-                        s * (point.x * point.x + point.y * point.y).sqrt(),
+                        conical_offset(point.x, point.y, slope_angle),
                         flat_bottom
                     )
                 ]
@@ -104,11 +95,7 @@ impl Transform {
                     point.y,
                     apply_flat_bottom_inverse(
                         point.z,
-                        height
-                            * ((2.0 * PI * point.x / pitch).sin()
-                                * (2.0 * PI * point.y / pitch).cos()
-                                + 1.0)
-                            / 2.0,
+                        sinusoidal_offset(point.x, point.y, height, pitch),
                         flat_bottom
                     )
                 ]
@@ -122,28 +109,31 @@ impl Transform {
             &Transform::Conical {
                 slope_angle,
                 flat_bottom,
-            } => {
-                let s = slope_angle.tan();
-                jacobian_flat_bottom(
-                    point.z,
-                    s * (point.x * point.x + point.y * point.y).sqrt(),
-                    flat_bottom,
-                )
-            }
+            } => jacobian_flat_bottom(
+                point.z,
+                conical_offset(point.x, point.y, slope_angle),
+                flat_bottom,
+            ),
             &Transform::Sinusoidal {
                 height,
                 pitch,
                 flat_bottom,
             } => jacobian_flat_bottom(
                 point.z,
-                height
-                    * ((2.0 * PI * point.x / pitch).sin() * (2.0 * PI * point.y / pitch).cos()
-                        + 1.0)
-                    / 2.0,
+                sinusoidal_offset(point.x, point.y, height, pitch),
                 flat_bottom,
             ),
         }
     }
+}
+
+fn conical_offset(x: f64, y: f64, slope_angle: f64) -> f64 {
+    let s = slope_angle.tan();
+    s * (x * x + y * y).sqrt()
+}
+
+fn sinusoidal_offset(x: f64, y: f64, height: f64, pitch: f64) -> f64 {
+    height * ((2.0 * PI * x / pitch).sin() * (2.0 * PI * y / pitch).cos() + 1.0) / 2.0
 }
 
 fn apply_flat_bottom(z: f64, offset: f64, flat_bottom: f64) -> f64 {
