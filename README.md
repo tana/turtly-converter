@@ -17,6 +17,10 @@ USE AT YOUR OWN RISK.
 This three-step approach, using an existing slicer, is the same as described in [the article by XYZdims](https://xyzdims.com/2021/03/03/3d-printing-90-overhangs-without-support-structure-with-non-planar-slicing-on-3-axis-printer/) and [the paper by Wüthrich et al](https://doi.org/10.3390/app11188760).
 
 ## 🚀Usage
+### 🎁Installation
+**turtly-converter** is a single-executable application.
+You can download a `.zip` file from [the Releases page](https://github.com/tana/turtly-converter/releases) and simply get an executable in that.
+
 ### ⌨Command line interface
 **turtly-converter** is a single executable with a subcommand-based interface.
 There are two main subcommands:
