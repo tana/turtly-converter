@@ -4,6 +4,7 @@
 
 mod dewarp;
 mod gcode;
+mod printer;
 mod tessellation;
 mod transform;
 mod utils;

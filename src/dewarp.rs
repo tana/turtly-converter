@@ -5,16 +5,16 @@
 use std::{
     ffi::OsString,
     fs::File,
-    io::{BufRead, BufReader, BufWriter, Write},
+    io::{BufRead, BufReader, BufWriter, Read, Write},
     path::Path,
 };
 
 use anyhow::Result;
 use clap::Args;
 use na::{vector, Vector3, Vector4};
-use nalgebra as na;
+use nalgebra::{self as na, point};
 
-use crate::gcode::command::BEGIN_DEWARP;
+use crate::{gcode::command::BEGIN_DEWARP, printer::Printer};
 use crate::{
     gcode::{
         command::{Command, G0, G1, G92},
@@ -33,6 +33,8 @@ pub struct DewarpArgs {
     max_line_len: f64,
     #[arg(short, long)]
     output_file: Option<OsString>,
+    #[arg(short, long)]
+    printer_file: Option<OsString>,
 }
 
 pub fn command_main(args: DewarpArgs) -> Result<()> {
@@ -54,10 +56,21 @@ pub fn command_main(args: DewarpArgs) -> Result<()> {
             .unwrap_or(default_output_path.as_os_str().to_owned()),
     )?;
 
+    let printer = if let Some(printer_file_path) = args.printer_file {
+        let mut printer_file_str = String::new();
+        File::open(Path::new(&printer_file_path))?.read_to_string(&mut printer_file_str)?;
+        toml::from_str(&printer_file_str)?
+    } else {
+        Printer::ThreeDoF {
+            center: point![0.0, 0.0],
+        }
+    };
+
     dewarp_gcode(
         input_file,
         output_file,
         transform,
+        printer,
         args.max_line_len,
         warped_aabb.origin.z,
     )?;
@@ -69,13 +82,14 @@ fn dewarp_gcode(
     input_file: File,
     output_file: File,
     transform: Transform,
+    printer: Printer,
     max_line_len: f64,
     z_offset: f64,
 ) -> Result<()> {
     let mut writer = BufWriter::new(output_file);
 
     let mut enabled = false;
-    let mut center = Vector3::zeros();
+    let mut center = vector![printer.center().x, printer.center().y, 0.0];
     let mut last_pos = Vector4::zeros();
     let mut corrected_e = 0.0;
 
@@ -84,8 +98,7 @@ fn dewarp_gcode(
 
         if let Ok((_, Some(cmd))) = parse_line(&line) {
             match cmd {
-                Command::G0(G0 { x, y, z, e, .. })
-                | Command::G1(G1 { x, y, z, e, .. }) => {
+                Command::G0(G0 { x, y, z, e, .. }) | Command::G1(G1 { x, y, z, e, .. }) => {
                     let pos = vector![
                         x.unwrap_or(last_pos.x),
                         y.unwrap_or(last_pos.y),
@@ -100,7 +113,8 @@ fn dewarp_gcode(
                         for p in interpolate(&last_pos, &pos, max_line_len) {
                             let dewarped = dewarp_point(p.xyz(), transform, center);
                             // Correct extrusion length using the inverse of Jacobian determinant
-                            corrected_e += (p[3] - last_e) / extrusion_correction(p.xyz(), transform, center);
+                            corrected_e +=
+                                (p[3] - last_e) / extrusion_correction(p.xyz(), transform, center);
                             last_e = p[3];
 
                             let z = dewarped.z.max(0.0); // Workaround for initial moves
@@ -129,7 +143,7 @@ fn dewarp_gcode(
                                     })
                                     .to_string()
                                 )?,
-                                _ => unreachable!()
+                                _ => unreachable!(),
                             }
                         }
                     } else {
