@@ -21,6 +21,7 @@ const DEFAULT_TYPE: TransformType = TransformType::Conical;
 const DEFAULT_SLOPE_ANGLE: f64 = 30.0; // degrees
 const DEFAULT_HEIGHT: f64 = 2.0; // mm
 const DEFAULT_PITCH: f64 = 10.0; // mm
+const DEFAULT_RADIUS: f64 = 100.0; // mm
 const DEFAULT_FLAT_BOTTOM: f64 = 0.0; // mm
 
 #[derive(Args)]
@@ -38,6 +39,8 @@ pub struct WarpArgs {
     height: f64,
     #[arg(short, long, default_value_t = DEFAULT_PITCH)]
     pitch: f64,
+    #[arg(short, long, default_value_t = DEFAULT_RADIUS)]
+    radius: f64,
     #[arg(long, default_value_t = DEFAULT_FLAT_BOTTOM)]
     flat_bottom: f64,
 }
@@ -64,6 +67,16 @@ pub fn command_main(args: WarpArgs) -> Result<()> {
             pitch: args.pitch,
             flat_bottom: args.flat_bottom,
         },
+        TransformType::Spherical => {
+            // TODO:
+            if args.radius < 0.0 {
+                panic!("Only positive radius is supported");
+            }
+            Transform::Spherical {
+                radius: args.radius,
+                flat_bottom: args.flat_bottom,
+            }
+        }
     };
 
     let tesselated_mesh = tesselate(input_mesh, args.max_edge_len);

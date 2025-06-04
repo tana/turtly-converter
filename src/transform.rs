@@ -20,6 +20,7 @@ pub struct TransformData {
 pub enum TransformType {
     Conical,
     Sinusoidal,
+    Spherical,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -32,6 +33,8 @@ pub enum Transform {
         pitch: f64,
         flat_bottom: f64,
     },
+    /// z' = z + r - sqrt(r^2 - x^2 - y^2) (for r>0)
+    Spherical { radius: f64, flat_bottom: f64 },
 }
 
 impl Transform {
@@ -62,6 +65,20 @@ impl Transform {
                     apply_flat_bottom(
                         point.z,
                         sinusoidal_offset(point.x, point.y, height, pitch),
+                        flat_bottom
+                    )
+                ]
+            }
+            &Transform::Spherical {
+                radius,
+                flat_bottom,
+            } => {
+                vector![
+                    point.x,
+                    point.y,
+                    apply_flat_bottom(
+                        point.z,
+                        spherical_offset(point.x, point.y, radius),
                         flat_bottom
                     )
                 ]
@@ -100,6 +117,20 @@ impl Transform {
                     )
                 ]
             }
+            &Transform::Spherical {
+                radius,
+                flat_bottom,
+            } => {
+                vector![
+                    point.x,
+                    point.y,
+                    apply_flat_bottom_inverse(
+                        point.z,
+                        spherical_offset(point.x, point.y, radius),
+                        flat_bottom
+                    )
+                ]
+            }
         }
     }
 
@@ -123,6 +154,14 @@ impl Transform {
                 sinusoidal_offset(point.x, point.y, height, pitch),
                 flat_bottom,
             ),
+            &Transform::Spherical {
+                radius,
+                flat_bottom,
+            } => jacobian_flat_bottom(
+                point.z,
+                spherical_offset(point.x, point.y, radius),
+                flat_bottom,
+            ),
         }
     }
 }
@@ -134,6 +173,10 @@ fn conical_offset(x: f64, y: f64, slope_angle: f64) -> f64 {
 
 fn sinusoidal_offset(x: f64, y: f64, height: f64, pitch: f64) -> f64 {
     height * ((2.0 * PI * x / pitch).sin() * (2.0 * PI * y / pitch).cos() + 1.0) / 2.0
+}
+
+fn spherical_offset(x: f64, y: f64, radius: f64) -> f64 {
+    radius - (radius * radius - x * x - y * y).sqrt()
 }
 
 fn apply_flat_bottom(z: f64, offset: f64, flat_bottom: f64) -> f64 {
