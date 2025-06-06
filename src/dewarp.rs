@@ -96,6 +96,8 @@ fn dewarp_gcode(
     let mut center = vector![printer.center().x, printer.center().y, 0.0];
     let mut last_pos = Vector4::zeros();
     let mut corrected_e = 0.0;
+    let mut last_c = 0.0;
+    let mut unwrapped_c = 0.0;
 
     for line in BufReader::new(input_file).lines() {
         let line = line?;
@@ -126,7 +128,18 @@ fn dewarp_gcode(
                             let c = match printer.printer_type() {
                                 PrinterType::ThreeDoF => None,
                                 PrinterType::DancingBed => {
-                                    Some(dewarped.y.atan2(dewarped.x) * 180.0 / consts::PI)
+                                    let c = dewarped.y.atan2(dewarped.x);
+                                    // Unwrapping
+                                    unwrapped_c += c - last_c;
+                                    if c - last_c < -consts::PI {
+                                        // Probably overflowed
+                                        unwrapped_c += 2.0 * consts::PI
+                                    } else if c - last_c > consts::PI {
+                                        // Probably underflowed
+                                        unwrapped_c -= 2.0 * consts::PI
+                                    }
+                                    last_c = c;
+                                    Some(unwrapped_c * 180.0 / consts::PI)
                                 }
                             };
 
