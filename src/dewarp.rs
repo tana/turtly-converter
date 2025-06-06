@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::{
+    f64::consts,
     ffi::OsString,
     fs::File,
     io::{BufRead, BufReader, BufWriter, Read, Write},
@@ -14,7 +15,10 @@ use clap::Args;
 use na::{vector, Vector3, Vector4};
 use nalgebra::{self as na, point};
 
-use crate::{gcode::command::BEGIN_DEWARP, printer::Printer};
+use crate::{
+    gcode::command::BEGIN_DEWARP,
+    printer::{GenericCoords, Printer, PrinterType},
+};
 use crate::{
     gcode::{
         command::{Command, G0, G1, G92},
@@ -118,14 +122,33 @@ fn dewarp_gcode(
                             last_e = p[3];
 
                             let z = dewarped.z.max(0.0); // Workaround for initial moves
+
+                            let c = match printer.printer_type() {
+                                PrinterType::ThreeDoF => None,
+                                PrinterType::DancingBed => {
+                                    Some(dewarped.y.atan2(dewarped.x) * 180.0 / consts::PI)
+                                }
+                            };
+
+                            let real_pos = printer.calc_ik(GenericCoords {
+                                x: dewarped.x,
+                                y: dewarped.y,
+                                z: z,
+                                c: c,
+                                ..Default::default()
+                            });
+
                             match cmd {
                                 Command::G0(ref cmd) => writeln!(
                                     &mut writer,
                                     "{}",
                                     (G0 {
-                                        x: Some(dewarped.x),
-                                        y: Some(dewarped.y),
-                                        z: Some(z),
+                                        x: Some(real_pos.x),
+                                        y: Some(real_pos.y),
+                                        z: Some(real_pos.z),
+                                        a: real_pos.a,
+                                        b: real_pos.b,
+                                        c: real_pos.c,
                                         e: Some(corrected_e),
                                         ..cmd.clone()
                                     })
@@ -135,9 +158,12 @@ fn dewarp_gcode(
                                     &mut writer,
                                     "{}",
                                     (G1 {
-                                        x: Some(dewarped.x),
-                                        y: Some(dewarped.y),
-                                        z: Some(z),
+                                        x: Some(real_pos.x),
+                                        y: Some(real_pos.y),
+                                        z: Some(real_pos.z),
+                                        a: real_pos.a,
+                                        b: real_pos.b,
+                                        c: real_pos.c,
                                         e: Some(corrected_e),
                                         ..cmd.clone()
                                     })
