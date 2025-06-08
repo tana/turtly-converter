@@ -4,7 +4,8 @@
 
 use std::f64::consts;
 
-use nalgebra::{vector, Point2, Point3, Rotation3, Vector3};
+use na::{Point2, Point3};
+use nalgebra as na;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
@@ -16,7 +17,7 @@ pub enum Printer {
     DancingBed {
         tilt: f64,
         pivot: Point3<f64>,
-        rot_offset: Vector3<f64>,
+        c_offset: f64,
     },
 }
 
@@ -45,32 +46,38 @@ impl Printer {
         }
     }
 
+    #[rustfmt::skip]
     pub fn calc_ik(&self, coords: GenericCoords) -> GenericCoords {
         match self {
             &Printer::ThreeDoF { .. } => coords,
             &Printer::DancingBed {
                 tilt,
                 pivot,
-                rot_offset,
+                c_offset,
             } => {
-                // Rotation in x-y-z (roll-pitch-yaw) order
-                let offset_rot =
-                    Rotation3::from_euler_angles(rot_offset.x, rot_offset.y, rot_offset.z);
-
-                let c = coords.c.expect("C coord is necessary");
+                let c = coords.c.expect("C coord is necessary") - c_offset;
                 let c_rad = c * consts::PI / 180.0;
-                let c_rot = Rotation3::from_axis_angle(&Vector3::z_axis(), c_rad);
-
                 let tilt_rad = tilt * consts::PI / 180.0;
-                let tilt_rot = Rotation3::from_axis_angle(&Vector3::x_axis(), tilt_rad);
-
-                let rotated = offset_rot * c_rot * tilt_rot * vector![coords.x, coords.y, coords.z];
-
+                let sin_c = c_rad.sin();
+                let cos_c = c_rad.cos();
+                let sin_tilt = tilt_rad.sin();
+                let cos_tilt = tilt_rad.cos();
                 GenericCoords {
-                    x: rotated.x + pivot.x,
-                    y: rotated.y + pivot.y,
-                    z: rotated.z + pivot.z,
-                    c: Some(c + rot_offset.z),
+                    /*
+                    x: cos_c * coords.x - sin_c * coords.y
+                        + pivot.x,
+                    y: cos_tilt * sin_c * coords.x + cos_tilt * cos_c * coords.y - sin_tilt * coords.z
+                        + pivot.y,
+                    z: sin_tilt * sin_c * coords.x + sin_tilt * cos_c * coords.y + cos_tilt * coords.z
+                        + pivot.z,
+                    */
+                    x: cos_c * coords.x - sin_c * cos_tilt * coords.y + sin_c * sin_tilt * coords.z
+                        + pivot.x,
+                    y: sin_c * coords.x + cos_c * cos_tilt * coords.y - cos_c * sin_tilt * coords.z
+                        + pivot.y,
+                    z: sin_tilt * coords.y + cos_tilt * coords.z
+                        + pivot.z,
+                    c: Some(c),
                     ..Default::default()
                 }
             }
