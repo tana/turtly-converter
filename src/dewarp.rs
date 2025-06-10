@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::{
-    f64::consts,
     ffi::OsString,
     fs::File,
     io::{BufRead, BufReader, BufWriter, Read, Write},
@@ -96,8 +95,6 @@ fn dewarp_gcode(
     let mut center = vector![printer.center().x, printer.center().y, 0.0];
     let mut last_pos = Vector4::zeros();
     let mut corrected_e = 0.0;
-    let mut last_c = 0.0;
-    let mut unwrapped_c = 0.0;
 
     for line in BufReader::new(input_file).lines() {
         let line = line?;
@@ -125,29 +122,21 @@ fn dewarp_gcode(
 
                             let z = dewarped.z.max(0.0); // Workaround for initial moves
 
-                            let c = match printer.printer_type() {
-                                PrinterType::ThreeDoF => None,
-                                PrinterType::DancingBed => {
-                                    let c = dewarped.y.atan2(dewarped.x);
-                                    // Unwrapping
-                                    unwrapped_c += c - last_c;
-                                    if c - last_c < -consts::PI {
-                                        // Probably overflowed
-                                        unwrapped_c += 2.0 * consts::PI
-                                    } else if c - last_c > consts::PI {
-                                        // Probably underflowed
-                                        unwrapped_c -= 2.0 * consts::PI
-                                    }
-                                    last_c = c;
-                                    Some(unwrapped_c * 180.0 / consts::PI)
-                                }
+                            let a = match printer.printer_type() {
+                                PrinterType::Xyz => None,
+                                PrinterType::Xyzab => Some(10.0),
+                            };
+                            let b = match printer.printer_type() {
+                                PrinterType::Xyz => None,
+                                PrinterType::Xyzab => Some(0.0),
                             };
 
                             let real_pos = printer.calc_ik(GenericCoords {
                                 x: dewarped.x,
                                 y: dewarped.y,
-                                z: z,
-                                c: c,
+                                z,
+                                a,
+                                b,
                                 ..Default::default()
                             });
 
@@ -159,9 +148,9 @@ fn dewarp_gcode(
                                         x: Some(real_pos.x),
                                         y: Some(real_pos.y),
                                         z: Some(real_pos.z),
-                                        a: real_pos.a,
-                                        b: real_pos.b,
-                                        c: real_pos.c,
+                                        i: real_pos.i,
+                                        j: real_pos.j,
+                                        k: real_pos.k,
                                         e: Some(corrected_e),
                                         ..cmd.clone()
                                     })
@@ -174,9 +163,9 @@ fn dewarp_gcode(
                                         x: Some(real_pos.x),
                                         y: Some(real_pos.y),
                                         z: Some(real_pos.z),
-                                        a: real_pos.a,
-                                        b: real_pos.b,
-                                        c: real_pos.c,
+                                        i: real_pos.i,
+                                        j: real_pos.j,
+                                        k: real_pos.k,
                                         e: Some(corrected_e),
                                         ..cmd.clone()
                                     })
