@@ -122,13 +122,19 @@ fn dewarp_gcode(
 
                             let z = dewarped.z.max(0.0); // Workaround for initial moves
 
+                            let tilt_angle = 10.0; // TODO:
+
                             let a = match printer.printer_type() {
                                 PrinterType::Xyz => None,
-                                PrinterType::Xyzab => Some(10.0),
+                                PrinterType::Xyzab => {
+                                    Some(tilt_angle * dewarped.y.atan2(dewarped.x).sin())
+                                }
                             };
                             let b = match printer.printer_type() {
                                 PrinterType::Xyz => None,
-                                PrinterType::Xyzab => Some(0.0),
+                                PrinterType::Xyzab => {
+                                    Some(-tilt_angle * dewarped.y.atan2(dewarped.x).cos())
+                                }
                             };
 
                             let real_pos = printer.calc_ik(GenericCoords {

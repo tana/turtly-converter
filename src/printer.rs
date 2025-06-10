@@ -14,8 +14,8 @@ pub enum Printer {
         center: Point2<f64>,
     },
     DifferentialTiltingBed {
+        pivot_to_bed: f64,
         pivot: Point3<f64>,
-        bed_pivot: f64,
         rot_offset: Vector3<f64>,
     },
 }
@@ -52,18 +52,10 @@ impl Printer {
         match self {
             &Printer::ThreeDoF { .. } => coords,
             &Printer::DifferentialTiltingBed {
+                pivot_to_bed,
                 pivot,
-                bed_pivot,
                 rot_offset,
             } => {
-                let rot_offset_rad = rot_offset * consts::PI / 180.0;
-                // Rotation in x-y-z (roll-pitch-yaw) order
-                let offset_rot = Rotation3::from_euler_angles(
-                    rot_offset_rad.x,
-                    rot_offset_rad.y,
-                    rot_offset_rad.z,
-                );
-
                 let a = coords.a.expect("A coord is necessary");
                 let a_rad = a * consts::PI / 180.0;
                 let a_rot = Rotation3::from_axis_angle(&Vector3::x_axis(), a_rad);
@@ -72,16 +64,24 @@ impl Printer {
                 let b_rad = b * consts::PI / 180.0;
                 let b_rot = Rotation3::from_axis_angle(&Vector3::y_axis(), b_rad);
 
+                let c_rot = Rotation3::from_axis_angle(
+                    &Vector3::z_axis(),
+                    rot_offset.z * consts::PI / 180.0,
+                );
+
                 let machine_xyz =
-                    offset_rot * b_rot * a_rot * vector![coords.x, coords.y, coords.z - bed_pivot]
+                    c_rot * b_rot * a_rot * vector![coords.x, coords.y, coords.z + pivot_to_bed]
                         + pivot.coords;
+
+                let machine_a = a - rot_offset.x;
+                let machine_b = b - rot_offset.y;
 
                 GenericCoords {
                     x: machine_xyz.x,
                     y: machine_xyz.y,
                     z: machine_xyz.z,
-                    i: Some(a + b),
-                    j: Some(a - b),
+                    i: Some(machine_a + machine_b),
+                    j: Some(machine_a - machine_b),
                     ..Default::default()
                 }
             }
