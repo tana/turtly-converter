@@ -13,7 +13,7 @@ use stl_io::{IndexedMesh, Triangle};
 use crate::{
     tessellation::tesselate,
     transform::{Transform, TransformData, TransformType},
-    utils::{Aabb, Mesh},
+    utils::{parse_vector, Aabb, Mesh},
 };
 
 const DEFAULT_MAX_EDGE_LEN: f64 = 1.0; // 1 mm
@@ -43,13 +43,19 @@ pub struct WarpArgs {
     radius: f64,
     #[arg(long, default_value_t = DEFAULT_FLAT_BOTTOM)]
     flat_bottom: f64,
+    #[arg(short, long, value_parser = parse_vector)]
+    center: Option<Vector3<f64>>,
 }
 
 pub fn command_main(args: WarpArgs) -> Result<()> {
     let input_path = Path::new(&args.input_file);
     let input_mesh = stl_io::read_stl(&mut File::open(input_path)?)?.into();
     let Aabb { origin, size } = calc_aabb(&input_mesh);
-    let center = vector![origin.x + size.x / 2.0, origin.y + size.y / 2.0, origin.z];
+    let center = args.center.unwrap_or(vector![
+        origin.x + size.x / 2.0,
+        origin.y + size.y / 2.0,
+        origin.z
+    ]);
 
     let transform = match args.transform_type {
         TransformType::Conical => {
