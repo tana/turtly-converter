@@ -13,7 +13,7 @@ use stl_io::{IndexedMesh, Triangle};
 use crate::{
     tessellation::tesselate,
     transform::{Transform, TransformData, TransformType},
-    utils::{Aabb, Mesh},
+    utils::{parse_vector, Aabb, Mesh},
 };
 
 const DEFAULT_MAX_EDGE_LEN: f64 = 1.0; // 1 mm
@@ -21,6 +21,7 @@ const DEFAULT_TYPE: TransformType = TransformType::Conical;
 const DEFAULT_SLOPE_ANGLE: f64 = 30.0; // degrees
 const DEFAULT_HEIGHT: f64 = 2.0; // mm
 const DEFAULT_PITCH: f64 = 10.0; // mm
+const DEFAULT_RADIUS: f64 = 100.0; // mm
 const DEFAULT_FLAT_BOTTOM: f64 = 0.0; // mm
 
 #[derive(Args)]
@@ -38,15 +39,23 @@ pub struct WarpArgs {
     height: f64,
     #[arg(short, long, default_value_t = DEFAULT_PITCH)]
     pitch: f64,
+    #[arg(short, long, default_value_t = DEFAULT_RADIUS)]
+    radius: f64,
     #[arg(long, default_value_t = DEFAULT_FLAT_BOTTOM)]
     flat_bottom: f64,
+    #[arg(short, long, value_parser = parse_vector)]
+    center: Option<Vector3<f64>>,
 }
 
 pub fn command_main(args: WarpArgs) -> Result<()> {
     let input_path = Path::new(&args.input_file);
     let input_mesh = stl_io::read_stl(&mut File::open(input_path)?)?.into();
     let Aabb { origin, size } = calc_aabb(&input_mesh);
-    let center = vector![origin.x + size.x / 2.0, origin.y + size.y / 2.0, origin.z];
+    let center = args.center.unwrap_or(vector![
+        origin.x + size.x / 2.0,
+        origin.y + size.y / 2.0,
+        origin.z
+    ]);
 
     let transform = match args.transform_type {
         TransformType::Conical => {
@@ -64,6 +73,16 @@ pub fn command_main(args: WarpArgs) -> Result<()> {
             pitch: args.pitch,
             flat_bottom: args.flat_bottom,
         },
+        TransformType::Spherical => {
+            // TODO:
+            if args.radius < 0.0 {
+                panic!("Only positive radius is supported");
+            }
+            Transform::Spherical {
+                radius: args.radius,
+                flat_bottom: args.flat_bottom,
+            }
+        }
     };
 
     let tesselated_mesh = tesselate(input_mesh, args.max_edge_len);
