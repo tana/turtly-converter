@@ -2,13 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+mod adaptive;
 use clap::ValueEnum;
 use na::{vector, Vector3};
 use nalgebra as na;
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 
-use crate::utils::Aabb;
+use crate::{transform::adaptive::AdaptiveTransform, utils::Aabb};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct TransformData {
@@ -21,6 +22,7 @@ pub enum TransformType {
     Conical,
     Sinusoidal,
     Spherical,
+    Adaptive,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -35,6 +37,7 @@ pub enum Transform {
     },
     /// z' = z + r - sqrt(r^2 - x^2 - y^2) (for r>0)
     Spherical { radius: f64, flat_bottom: f64 },
+    Adaptive(AdaptiveTransform),
 }
 
 impl Transform {
@@ -83,6 +86,7 @@ impl Transform {
                     )
                 ]
             }
+            &Transform::Adaptive(transform) => transform.apply(point),
         }
     }
 
@@ -131,6 +135,7 @@ impl Transform {
                     )
                 ]
             }
+            &Transform::Adaptive(transform) => transform.apply_inverse(point),
         }
     }
 
@@ -162,6 +167,7 @@ impl Transform {
                 spherical_offset(point.x, point.y, radius),
                 flat_bottom,
             ),
+            &Transform::Adaptive(transform) => transform.jacobian(point),
         }
     }
 }
