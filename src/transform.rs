@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-mod adaptive;
+pub mod adaptive;
+
 use clap::ValueEnum;
 use na::{vector, Vector3};
 use nalgebra as na;
@@ -11,7 +12,7 @@ use std::f64::consts::PI;
 
 use crate::{transform::adaptive::AdaptiveTransform, utils::Aabb};
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TransformData {
     pub transform: Transform,
     pub warped_aabb: Aabb,
@@ -25,10 +26,13 @@ pub enum TransformType {
     Adaptive,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Transform {
     /// z' = z + tan(slope_angle)*sqrt(x^2 + y^2)
-    Conical { slope_angle: f64, flat_bottom: f64 },
+    Conical {
+        slope_angle: f64,
+        flat_bottom: f64,
+    },
     /// z' = z + height*(sin(2*π*x/pitch)*cos(2*π*y/pitch)+1)/2
     Sinusoidal {
         height: f64,
@@ -36,13 +40,16 @@ pub enum Transform {
         flat_bottom: f64,
     },
     /// z' = z + r - sqrt(r^2 - x^2 - y^2) (for r>0)
-    Spherical { radius: f64, flat_bottom: f64 },
+    Spherical {
+        radius: f64,
+        flat_bottom: f64,
+    },
     Adaptive(AdaptiveTransform),
 }
 
 impl Transform {
     pub fn apply(&self, point: Vector3<f64>) -> Vector3<f64> {
-        match self {
+        match &self {
             &Transform::Conical {
                 slope_angle,
                 flat_bottom,
@@ -52,8 +59,8 @@ impl Transform {
                     point.y,
                     apply_flat_bottom(
                         point.z,
-                        conical_offset(point.x, point.y, slope_angle),
-                        flat_bottom
+                        conical_offset(point.x, point.y, *slope_angle),
+                        *flat_bottom
                     )
                 ]
             }
@@ -67,8 +74,8 @@ impl Transform {
                     point.y,
                     apply_flat_bottom(
                         point.z,
-                        sinusoidal_offset(point.x, point.y, height, pitch),
-                        flat_bottom
+                        sinusoidal_offset(point.x, point.y, *height, *pitch),
+                        *flat_bottom
                     )
                 ]
             }
@@ -81,8 +88,8 @@ impl Transform {
                     point.y,
                     apply_flat_bottom(
                         point.z,
-                        spherical_offset(point.x, point.y, radius),
-                        flat_bottom
+                        spherical_offset(point.x, point.y, *radius),
+                        *flat_bottom
                     )
                 ]
             }
@@ -91,7 +98,7 @@ impl Transform {
     }
 
     pub fn apply_inverse(&self, point: Vector3<f64>) -> Vector3<f64> {
-        match self {
+        match &self {
             &Transform::Conical {
                 slope_angle,
                 flat_bottom,
@@ -101,8 +108,8 @@ impl Transform {
                     point.y,
                     apply_flat_bottom_inverse(
                         point.z,
-                        conical_offset(point.x, point.y, slope_angle),
-                        flat_bottom
+                        conical_offset(point.x, point.y, *slope_angle),
+                        *flat_bottom
                     )
                 ]
             }
@@ -116,8 +123,8 @@ impl Transform {
                     point.y,
                     apply_flat_bottom_inverse(
                         point.z,
-                        sinusoidal_offset(point.x, point.y, height, pitch),
-                        flat_bottom
+                        sinusoidal_offset(point.x, point.y, *height, *pitch),
+                        *flat_bottom
                     )
                 ]
             }
@@ -130,8 +137,8 @@ impl Transform {
                     point.y,
                     apply_flat_bottom_inverse(
                         point.z,
-                        spherical_offset(point.x, point.y, radius),
-                        flat_bottom
+                        spherical_offset(point.x, point.y, *radius),
+                        *flat_bottom
                     )
                 ]
             }
@@ -141,14 +148,14 @@ impl Transform {
 
     /// Jacobian determinant of forward transform i.e. Ratio of volume magnification
     pub fn jacobian(&self, point: Vector3<f64>) -> f64 {
-        match self {
+        match &self {
             &Transform::Conical {
                 slope_angle,
                 flat_bottom,
             } => jacobian_flat_bottom(
                 point.z,
-                conical_offset(point.x, point.y, slope_angle),
-                flat_bottom,
+                conical_offset(point.x, point.y, *slope_angle),
+                *flat_bottom,
             ),
             &Transform::Sinusoidal {
                 height,
@@ -156,16 +163,16 @@ impl Transform {
                 flat_bottom,
             } => jacobian_flat_bottom(
                 point.z,
-                sinusoidal_offset(point.x, point.y, height, pitch),
-                flat_bottom,
+                sinusoidal_offset(point.x, point.y, *height, *pitch),
+                *flat_bottom,
             ),
             &Transform::Spherical {
                 radius,
                 flat_bottom,
             } => jacobian_flat_bottom(
                 point.z,
-                spherical_offset(point.x, point.y, radius),
-                flat_bottom,
+                spherical_offset(point.x, point.y, *radius),
+                *flat_bottom,
             ),
             &Transform::Adaptive(transform) => transform.jacobian(point),
         }

@@ -12,7 +12,7 @@ use stl_io::{IndexedMesh, Triangle};
 
 use crate::{
     tessellation::tesselate,
-    transform::{Transform, TransformData, TransformType},
+    transform::{adaptive::fit_adaptive, Transform, TransformData, TransformType},
     utils::{parse_vector, Aabb, Mesh},
 };
 
@@ -49,8 +49,8 @@ pub struct WarpArgs {
 
 pub fn command_main(args: WarpArgs) -> Result<()> {
     let input_path = Path::new(&args.input_file);
-    let input_mesh = stl_io::read_stl(&mut File::open(input_path)?)?.into();
-    let Aabb { origin, size } = calc_aabb(&input_mesh);
+    let input_mesh: Mesh = stl_io::read_stl(&mut File::open(input_path)?)?.into();
+    let Aabb { origin, size } = input_mesh.calc_aabb();
     let center = args.center.unwrap_or(vector![
         origin.x + size.x / 2.0,
         origin.y + size.y / 2.0,
@@ -83,14 +83,15 @@ pub fn command_main(args: WarpArgs) -> Result<()> {
                 flat_bottom: args.flat_bottom,
             }
         }
-        TransformType::Adaptive => todo!(),
+        // TODO:
+        TransformType::Adaptive => Transform::Adaptive(fit_adaptive(&input_mesh, &center)),
     };
 
     let tesselated_mesh = tesselate(input_mesh, args.max_edge_len);
 
-    let warped_mesh = warp_mesh(tesselated_mesh, transform, center);
+    let warped_mesh = warp_mesh(tesselated_mesh, &transform, center);
 
-    let warped_aabb = calc_aabb(&warped_mesh);
+    let warped_aabb = warped_mesh.calc_aabb();
 
     let mut default_output_path = input_path.to_owned();
     default_output_path.set_extension("warped.stl");
@@ -127,22 +128,7 @@ fn unindex_stl(mesh: IndexedMesh) -> Vec<Triangle> {
         .collect()
 }
 
-fn calc_aabb(input: &Mesh) -> Aabb {
-    let mut min = Vector3::from_element(std::f64::MAX);
-    let mut max = Vector3::from_element(std::f64::MIN);
-
-    for vert in input.vertices.iter() {
-        min = min.map_with_location(|i, _, e: f64| e.min(vert[i]));
-        max = max.map_with_location(|i, _, e: f64| e.max(vert[i]));
-    }
-
-    Aabb {
-        origin: min,
-        size: max - min,
-    }
-}
-
-fn warp_mesh(input: Mesh, transform: Transform, center: Vector3<f64>) -> Mesh {
+fn warp_mesh(input: Mesh, transform: &Transform, center: Vector3<f64>) -> Mesh {
     let vertices = input
         .vertices
         .into_iter()

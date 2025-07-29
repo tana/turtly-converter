@@ -18,6 +18,23 @@ pub struct Mesh {
     pub triangles: Vec<[usize; 3]>,
 }
 
+impl Mesh {
+    pub fn calc_aabb(&self) -> Aabb {
+        let mut min = na::Vector3::from_element(std::f64::MAX);
+        let mut max = na::Vector3::from_element(std::f64::MIN);
+
+        for vert in self.vertices.iter() {
+            min = min.map_with_location(|i, _, e: f64| e.min(vert[i]));
+            max = max.map_with_location(|i, _, e: f64| e.max(vert[i]));
+        }
+
+        Aabb {
+            origin: min,
+            size: max - min,
+        }
+    }
+}
+
 impl From<stl_io::IndexedMesh> for Mesh {
     fn from(value: stl_io::IndexedMesh) -> Self {
         Self {

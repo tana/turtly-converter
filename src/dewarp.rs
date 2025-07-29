@@ -84,8 +84,7 @@ fn dewarp_gcode(
 
         if let Ok((_, Some(cmd))) = parse_line(&line) {
             match cmd {
-                Command::G0(G0 { x, y, z, e, .. })
-                | Command::G1(G1 { x, y, z, e, .. }) => {
+                Command::G0(G0 { x, y, z, e, .. }) | Command::G1(G1 { x, y, z, e, .. }) => {
                     let pos = vector![
                         x.unwrap_or(last_pos.x),
                         y.unwrap_or(last_pos.y),
@@ -98,9 +97,10 @@ fn dewarp_gcode(
                         let mut last_e = last_pos[3];
                         // Split movement into short parts because it may be nonlinear after dewarping
                         for p in interpolate(&last_pos, &pos, max_line_len) {
-                            let dewarped = dewarp_point(p.xyz(), transform, center);
+                            let dewarped = dewarp_point(p.xyz(), &transform, center);
                             // Correct extrusion length using the inverse of Jacobian determinant
-                            corrected_e += (p[3] - last_e) / extrusion_correction(p.xyz(), transform, center);
+                            corrected_e +=
+                                (p[3] - last_e) / extrusion_correction(p.xyz(), &transform, center);
                             last_e = p[3];
 
                             let z = dewarped.z.max(0.0); // Workaround for initial moves
@@ -129,7 +129,7 @@ fn dewarp_gcode(
                                     })
                                     .to_string()
                                 )?,
-                                _ => unreachable!()
+                                _ => unreachable!(),
                             }
                         }
                     } else {
@@ -173,11 +173,11 @@ fn dewarp_gcode(
     Ok(())
 }
 
-fn dewarp_point(point: Vector3<f64>, transform: Transform, center: Vector3<f64>) -> Vector3<f64> {
+fn dewarp_point(point: Vector3<f64>, transform: &Transform, center: Vector3<f64>) -> Vector3<f64> {
     transform.apply_inverse(point - center) + center
 }
 
-fn extrusion_correction(point: Vector3<f64>, transform: Transform, center: Vector3<f64>) -> f64 {
+fn extrusion_correction(point: Vector3<f64>, transform: &Transform, center: Vector3<f64>) -> f64 {
     transform.jacobian(transform.apply_inverse(point - center))
 }
 
