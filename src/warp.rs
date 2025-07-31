@@ -8,6 +8,9 @@ use anyhow::Result;
 use clap::Args;
 use na::{vector, Vector3};
 use nalgebra as na;
+use ply_rs_bw::ply::{
+    Addable as _, DefaultElement, ElementDef, Ply, Property, PropertyDef, PropertyType, ScalarType,
+};
 use stl_io::{IndexedMesh, Triangle};
 
 use crate::{
@@ -45,6 +48,8 @@ pub struct WarpArgs {
     flat_bottom: f64,
     #[arg(short, long, value_parser = parse_vector)]
     center: Option<Vector3<f64>>,
+    #[arg(long)]
+    visualize: bool,
 }
 
 pub fn command_main(args: WarpArgs) -> Result<()> {
@@ -88,7 +93,7 @@ pub fn command_main(args: WarpArgs) -> Result<()> {
 
     let tesselated_mesh = tesselate(input_mesh, args.max_edge_len);
 
-    let warped_mesh = warp_mesh(tesselated_mesh, &transform, center);
+    let warped_mesh = warp_mesh(&tesselated_mesh, &transform, center);
 
     let warped_aabb = warped_mesh.calc_aabb();
 
@@ -101,6 +106,17 @@ pub fn command_main(args: WarpArgs) -> Result<()> {
 
     let mut transform_file_path = input_path.to_owned();
     transform_file_path.set_extension("transform.json");
+
+    if args.visualize {
+        let mut visualization_file_path = input_path.to_owned();
+        visualization_file_path.set_extension("visualization.ply");
+
+        let mut ply = visualize(&tesselated_mesh, &transform, center);
+        let writer = ply_rs_bw::writer::Writer::new();
+
+        let mut visualization_file = File::create(visualization_file_path)?;
+        writer.write_ply(&mut visualization_file, &mut ply)?;
+    }
 
     let mut output_file = File::create(output_path)?;
     stl_io::write_stl(&mut output_file, unindex_stl(warped_mesh.into()).iter())?;
@@ -127,15 +143,116 @@ fn unindex_stl(mesh: IndexedMesh) -> Vec<Triangle> {
         .collect()
 }
 
-fn warp_mesh(input: Mesh, transform: &Transform, center: Vector3<f64>) -> Mesh {
+fn warp_mesh(input: &Mesh, transform: &Transform, center: Vector3<f64>) -> Mesh {
     let vertices = input
         .vertices
-        .into_iter()
+        .iter()
         .map(|vert| transform.apply(vert - center))
         .collect();
 
     Mesh {
         vertices,
-        triangles: input.triangles,
+        triangles: input.triangles.clone(),
     }
+}
+
+fn visualize(mesh: &Mesh, transform: &Transform, center: Vector3<f64>) -> Ply<DefaultElement> {
+    // Calculate z coordinates after transform
+    let warped_z: Vec<f64> = mesh
+        .vertices
+        .iter()
+        .map(|pos| transform.apply(pos - center).z)
+        .collect();
+    let warped_z_max = warped_z
+        .clone()
+        .into_iter()
+        .reduce(f64::max)
+        .unwrap_or(std::f64::MIN);
+    let warped_z_min = warped_z
+        .clone()
+        .into_iter()
+        .reduce(f64::min)
+        .unwrap_or(std::f64::MAX);
+
+    let mut ply = Ply::<DefaultElement>::new();
+
+    // Define "vertex" element
+    let mut vertex_element = ElementDef::new("vertex".into());
+    vertex_element.properties.add(PropertyDef::new(
+        "x".into(),
+        PropertyType::Scalar(ScalarType::Float),
+    ));
+    vertex_element.properties.add(PropertyDef::new(
+        "y".into(),
+        PropertyType::Scalar(ScalarType::Float),
+    ));
+    vertex_element.properties.add(PropertyDef::new(
+        "z".into(),
+        PropertyType::Scalar(ScalarType::Float),
+    ));
+    vertex_element.properties.add(PropertyDef::new(
+        "red".into(),
+        PropertyType::Scalar(ScalarType::UChar),
+    ));
+    vertex_element.properties.add(PropertyDef::new(
+        "green".into(),
+        PropertyType::Scalar(ScalarType::UChar),
+    ));
+    vertex_element.properties.add(PropertyDef::new(
+        "blue".into(),
+        PropertyType::Scalar(ScalarType::UChar),
+    ));
+    ply.header.elements.add(vertex_element);
+
+    // Define "face" element
+    let mut face_element = ElementDef::new("face".into());
+    face_element.properties.add(PropertyDef::new(
+        "vertex_index".into(),
+        PropertyType::List(ScalarType::UChar, ScalarType::Int),
+    ));
+    ply.header.elements.add(face_element);
+
+    let colormap = colorous::TURBO;
+
+    // Write vertices into PLY
+    let vertices = mesh
+        .vertices
+        .iter()
+        .zip(warped_z.iter())
+        .map(|(pos, warped_z)| {
+            let mut vertex = DefaultElement::new();
+
+            // Vertex position
+            vertex.insert("x".into(), Property::Float(pos.x as f32));
+            vertex.insert("y".into(), Property::Float(pos.y as f32));
+            vertex.insert("z".into(), Property::Float(pos.z as f32));
+
+            // Color a vertex based on warped z position
+            let color =
+                colormap.eval_continuous((warped_z - warped_z_min) / (warped_z_max - warped_z_min));
+            vertex.insert("red".into(), Property::UChar(color.r));
+            vertex.insert("green".into(), Property::UChar(color.g));
+            vertex.insert("blue".into(), Property::UChar(color.b));
+
+            vertex
+        })
+        .collect();
+    ply.payload.insert("vertex".into(), vertices);
+
+    // Write faces into PLY
+    let faces = mesh
+        .triangles
+        .iter()
+        .map(|[v0, v1, v2]| {
+            let mut face = DefaultElement::new();
+            face.insert(
+                "vertex_index".into(),
+                Property::ListInt(vec![*v0 as i32, *v1 as i32, *v2 as i32]),
+            );
+            face
+        })
+        .collect();
+    ply.payload.insert("face".into(), faces);
+
+    ply
 }
