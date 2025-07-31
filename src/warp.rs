@@ -83,8 +83,7 @@ pub fn command_main(args: WarpArgs) -> Result<()> {
                 flat_bottom: args.flat_bottom,
             }
         }
-        // TODO:
-        TransformType::Adaptive => Transform::Adaptive(fit_adaptive(&input_mesh, &center)),
+        TransformType::Adaptive => Transform::Adaptive(fit_adaptive(&input_mesh, &center, 4)),
     };
 
     let tesselated_mesh = tesselate(input_mesh, args.max_edge_len);
