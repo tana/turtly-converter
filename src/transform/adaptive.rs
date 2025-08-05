@@ -1,3 +1,5 @@
+use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
+
 use na::{vector, Vector3};
 use nalgebra::{self as na, DMatrix, DVector};
 use serde::{Deserialize, Serialize};
@@ -18,7 +20,7 @@ impl AdaptiveTransform {
         vector![
             point.x,
             point.y,
-            bezier3d(&self.coeffs, scaled.x, scaled.y, scaled.z),
+            point.z + bezier3d(&self.coeffs, scaled.x, scaled.y, scaled.z),
         ]
     }
 
@@ -29,17 +31,22 @@ impl AdaptiveTransform {
     pub fn jacobian(&self, point: Vector3<f64>) -> f64 {
         let scaled = self.scale.component_mul(&(point - &self.origin));
 
-        self.scale.z * bezier3d_dz(&self.coeffs, scaled.x, scaled.y, scaled.z)
+        1.0 + self.scale.z * bezier3d_dz(&self.coeffs, scaled.x, scaled.y, scaled.z)
     }
 }
 
-pub fn fit_adaptive(mesh: &Mesh, center: &Vector3<f64>, order: usize) -> AdaptiveTransform {
+pub fn fit_adaptive(
+    mesh: &Mesh,
+    center: &Vector3<f64>,
+    order: usize,
+    lambda: f64,
+) -> AdaptiveTransform {
     let aabb = mesh.calc_aabb();
     let origin = aabb.origin - center;
     let scale = Vector3::from_element(1.0).component_div(&aabb.size);
-    let num_coeffs = (order + 1) * (order + 1) * order;
+    let num_coeffs = (order + 1) * (order + 1) * (order + 1);
 
-    let targets = target_normals(mesh);
+    let targets = target_normals(mesh, *center);
 
     // Fill A and b of Ax=b
     let mut a_mat = DMatrix::zeros(3 * targets.len(), num_coeffs);
@@ -48,21 +55,11 @@ pub fn fit_adaptive(mesh: &Mesh, center: &Vector3<f64>, order: usize) -> Adaptiv
         let scaled = scale.component_mul(&(point - &origin));
 
         // ∂f/∂x = ΣΣΣ w_{i,j,k} s_x b'_{i,n}(s_x x) b_{j,n}(s_y y) b_{k,n}(s_z z)
-        let mut dx_dw = bezier3d_dx_dw(order, scaled.x, scaled.y, scaled.z);
+        let dx_dw = bezier3d_dx_dw(order, scaled.x, scaled.y, scaled.z);
         // ∂f/∂y = ΣΣΣ w_{i,j,k} s_y b_{i,n}(s_x x) b'_{j,n}(s_y y) b_{k,n}(s_z z)
-        let mut dy_dw = bezier3d_dy_dw(order, scaled.x, scaled.y, scaled.z);
-        // ∂f/∂z = ΣΣΣ w_{i,j,k} s_z b_{i,n}(s_x x) b_{j,n}(s_y y) b'_{k,n}(s_z z)
-        let mut dz_dw = bezier3d_dz_dw(order, scaled.x, scaled.y, scaled.z);
-
-        // Eliminate w_{i,j,0} to ensure them to be zero
-        // That forces f(x,y,0)=0
-        for i in 0..=order {
-            for j in 0..=order {
-                dx_dw[i][j].remove(0);
-                dy_dw[i][j].remove(0);
-                dz_dw[i][j].remove(0);
-            }
-        }
+        let dy_dw = bezier3d_dy_dw(order, scaled.x, scaled.y, scaled.z);
+        // ∂f/∂z = 1 + ΣΣΣ w_{i,j,k} s_z b_{i,n}(s_x x) b_{j,n}(s_y y) b'_{k,n}(s_z z)
+        let dz_dw = bezier3d_dz_dw(order, scaled.x, scaled.y, scaled.z);
 
         dx_dw
             .iter()
@@ -89,30 +86,29 @@ pub fn fit_adaptive(mesh: &Mesh, center: &Vector3<f64>, order: usize) -> Adaptiv
             .map(|b| scale.z * b)
             .zip(a_mat.row_mut(3 * i + 2).iter_mut())
             .for_each(|(val, dst)| *dst = val);
-        b_vec[3 * i + 2] = normal.z;
+        b_vec[3 * i + 2] = normal.z - 1.0;
+    }
+
+    let mut gram_mat = a_mat.clone().transpose() * a_mat.clone();
+    // Add L2-norm regularization
+    for i in 0..num_coeffs {
+        gram_mat[(i, i)] += lambda;
     }
 
     // Solve
-    let coeffs = (a_mat.clone().transpose() * a_mat.clone())
+    let coeffs = gram_mat
         .qr()
         .solve(&(a_mat.transpose() * b_vec))
         .expect("Singular matrix in least squares");
 
-    let mut coeffs: Vec<Vec<Vec<_>>> = coeffs
+    let coeffs: Vec<Vec<Vec<_>>> = coeffs
         .as_slice()
-        .chunks(order)
+        .chunks(order + 1)
         .map(|coeffs_ij| coeffs_ij.into())
         .collect::<Vec<_>>()
         .chunks(order + 1)
         .map(|coeffs_i| coeffs_i.into())
         .collect();
-
-    // Restore w_{i,j,0} as zero
-    for i in 0..=order {
-        for j in 0..=order {
-            coeffs[i][j].insert(0, 0.0);
-        }
-    }
 
     AdaptiveTransform {
         scale,
@@ -121,7 +117,7 @@ pub fn fit_adaptive(mesh: &Mesh, center: &Vector3<f64>, order: usize) -> Adaptiv
     }
 }
 
-fn target_normals(mesh: &Mesh) -> Vec<(Vector3<f64>, Vector3<f64>)> {
+fn target_normals(mesh: &Mesh, center: Vector3<f64>) -> Vec<(Vector3<f64>, Vector3<f64>)> {
     let mut target = Vec::with_capacity(mesh.triangles.len());
 
     for tri in mesh.triangles.iter() {
@@ -131,16 +127,30 @@ fn target_normals(mesh: &Mesh) -> Vec<(Vector3<f64>, Vector3<f64>)> {
         // Normal vector of the triangle
         let tri_normal = (v2 - v1).cross(&(v3 - v2)).normalize();
 
-        // Overhang angle
-        let angle = tri_normal.z.acos() * 180.0 / std::f64::consts::PI - 90.0;
-
-        if -45.0 < angle && angle < 45.0 {
-            // Project Z axis on the triangle plane
-            let target_normal = Vector3::z() - tri_normal * tri_normal.z;
-            assert!(target_normal.norm() > std::f64::EPSILON);
-
-            target.push((tri_center, target_normal.normalize()));
+        if (tri_center - center).z < 0.1 {
+            // close to the bed, probably bottom surface
+            // TODO: variable threshold
+            continue;
         }
+
+        // Overhang angle (positive means overhang)
+        let angle = tri_normal.z.acos() - FRAC_PI_2;
+
+        if angle < 0.0 {
+            // Ignore non-overhang
+            continue;
+        }
+
+        let side = Vector3::z().cross(&tri_normal).cross(&Vector3::z());
+        if side.norm() < std::f64::EPSILON {
+            continue;
+        }
+        let side = side.normalize();
+
+        let target_angle = angle.clamp(-FRAC_PI_4, FRAC_PI_4);
+        let target_normal = target_angle.cos() * Vector3::z() + target_angle.sin() * side;
+
+        target.push((tri_center, target_normal));
     }
 
     target
