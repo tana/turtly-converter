@@ -1,26 +1,25 @@
+use core::panic;
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
 use na::{vector, Vector3};
 use nalgebra::{self as na, DMatrix, DVector};
+use nalgebra_sparse_linalg::{iteratives::conjugate_gradient, CsrMatrix};
 use serde::{Deserialize, Serialize};
 
 use crate::utils::Mesh;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AdaptiveTransform {
-    scale: Vector3<f64>,
-    origin: Vector3<f64>,
+    knots: (Vec<f64>, Vec<f64>, Vec<f64>),
     coeffs: Vec<Vec<Vec<f64>>>,
 }
 
 impl AdaptiveTransform {
     pub fn apply(&self, point: Vector3<f64>) -> Vector3<f64> {
-        let scaled = self.scale.component_mul(&(point - &self.origin));
-
         vector![
             point.x,
             point.y,
-            point.z + bezier3d(&self.coeffs, scaled.x, scaled.y, scaled.z),
+            point.z + bspline3d(&self.knots, &self.coeffs, point.x, point.y, point.z),
         ]
     }
 
@@ -29,90 +28,113 @@ impl AdaptiveTransform {
     }
 
     pub fn jacobian(&self, point: Vector3<f64>) -> f64 {
-        let scaled = self.scale.component_mul(&(point - &self.origin));
-
-        1.0 + self.scale.z * bezier3d_dz(&self.coeffs, scaled.x, scaled.y, scaled.z)
+        1.0 + bspline3d_dz(&self.knots, &self.coeffs, point.x, point.y, point.z)
     }
 }
 
 pub fn fit_adaptive(
     mesh: &Mesh,
     center: &Vector3<f64>,
-    order: usize,
+    deg: usize,
+    div: usize,
     lambda: f64,
 ) -> AdaptiveTransform {
     let aabb = mesh.calc_aabb();
     let origin = aabb.origin - center;
-    let scale = Vector3::from_element(1.0).component_div(&aabb.size);
-    let num_coeffs = (order + 1) * (order + 1) * (order + 1);
+
+    let knots_x = make_knots(origin.x, origin.x + aabb.size.x, deg, div);
+    let knots_y = make_knots(origin.y, origin.y + aabb.size.y, deg, div);
+    let knots_z = make_knots(origin.z, origin.z + aabb.size.z, deg, div);
+
+    let num_coeffs_x = knots_x.len() - deg - 1;
+    let num_coeffs_y = knots_y.len() - deg - 1;
+    let num_coeffs_z = knots_z.len() - deg - 1;
+    let num_coeffs = num_coeffs_x * num_coeffs_y * num_coeffs_z;
 
     let targets = target_normals(mesh, *center);
 
     // Fill A and b of Ax=b
-    let mut a_mat = DMatrix::zeros(3 * targets.len(), num_coeffs);
+    let mut a_mat = DMatrix::<f64>::zeros(3 * targets.len(), num_coeffs);
     let mut b_vec = DVector::zeros(3 * targets.len());
-    for (i, (point, normal)) in targets.iter().enumerate() {
-        let scaled = scale.component_mul(&(point - &origin));
+    for (target_idx, (point, normal)) in targets.iter().enumerate() {
+        let point = point - center;
 
-        // ∂f/∂x = ΣΣΣ w_{i,j,k} s_x b'_{i,n}(s_x x) b_{j,n}(s_y y) b_{k,n}(s_z z)
-        let dx_dw = bezier3d_dx_dw(order, scaled.x, scaled.y, scaled.z);
-        // ∂f/∂y = ΣΣΣ w_{i,j,k} s_y b_{i,n}(s_x x) b'_{j,n}(s_y y) b_{k,n}(s_z z)
-        let dy_dw = bezier3d_dy_dw(order, scaled.x, scaled.y, scaled.z);
-        // ∂f/∂z = 1 + ΣΣΣ w_{i,j,k} s_z b_{i,n}(s_x x) b_{j,n}(s_y y) b'_{k,n}(s_z z)
-        let dz_dw = bezier3d_dz_dw(order, scaled.x, scaled.y, scaled.z);
+        for i in 0..num_coeffs_x {
+            let basis_x = bspline_basis(&knots_x, i, deg, point.x);
+            let basis_x_dx = bspline_basis_deriv(&knots_x, i, deg, point.x);
 
-        dx_dw
-            .iter()
-            .flatten()
-            .flatten()
-            .map(|b| scale.x * b)
-            .zip(a_mat.row_mut(3 * i).iter_mut())
-            .for_each(|(val, dst)| *dst = val);
-        b_vec[3 * i] = normal.x;
+            if basis_x.is_nan() { panic!("basis_x is nan") }
+            if basis_x_dx.is_nan() { panic!("basis_x_dx is nan") }
 
-        dy_dw
-            .iter()
-            .flatten()
-            .flatten()
-            .map(|b| scale.y * b)
-            .zip(a_mat.row_mut(3 * i + 1).iter_mut())
-            .for_each(|(val, dst)| *dst = val);
-        b_vec[3 * i + 1] = normal.y;
+            for j in 0..num_coeffs_y {
+                let basis_y = bspline_basis(&knots_y, j, deg, point.y);
+                let basis_y_dy = bspline_basis_deriv(&knots_y, j, deg, point.y);
 
-        dz_dw
-            .iter()
-            .flatten()
-            .flatten()
-            .map(|b| scale.z * b)
-            .zip(a_mat.row_mut(3 * i + 2).iter_mut())
-            .for_each(|(val, dst)| *dst = val);
-        b_vec[3 * i + 2] = normal.z - 1.0;
+                if basis_y.is_nan() { panic!("basis_y is nan") }
+                if basis_y_dy.is_nan() { panic!("basis_y_dy is nan") }
+
+                for k in 0..num_coeffs_z {
+                    let basis_z = bspline_basis(&knots_z, k, deg, point.z);
+                    let basis_z_dz = bspline_basis_deriv(&knots_z, k, deg, point.z);
+
+                    if basis_z.is_nan() { panic!("basis_z is nan") }
+                    if basis_z_dz.is_nan() { panic!("basis_z_dz is nan") }
+
+                    let col = (i * num_coeffs_x + j) * num_coeffs_y + k;
+                    // ∂f/∂x = ΣΣΣ w_{i,j,k} b'_{i,p}(x) b_{j,p}(y) b_{k,p}(z)
+                    a_mat[(3 * target_idx, col)] = basis_x_dx * basis_y * basis_z;
+                    b_vec[3 * target_idx] = normal.x;
+                    // ∂f/∂y = ΣΣΣ w_{i,j,k} b_{i,p}(x) b'_{j,p}(y) b_{k,p}(z)
+                    a_mat[(3 * target_idx + 1, col)] = basis_x * basis_y_dy * basis_z;
+                    b_vec[3 * target_idx + 1] = normal.y;
+                    // ∂f/∂z = 1 + ΣΣΣ w_{i,j,k} b_{i,p}(x) b_{j,p}(y) b'_{k,p}(z)
+                    a_mat[(3 * target_idx + 2, col)] = basis_x * basis_y * basis_z_dz;
+                    b_vec[3 * target_idx + 2] = normal.z - 1.0;
+                }
+            }
+        }
     }
 
-    let mut gram_mat = a_mat.clone().transpose() * a_mat.clone();
+    println!("Sparsify...");
+    let a_mat = CsrMatrix::from(&a_mat);
+
+    let gram_mat = a_mat.transpose() * &a_mat;
     // Add L2-norm regularization
-    for i in 0..num_coeffs {
-        gram_mat[(i, i)] += lambda;
-    }
+    // for i in 0..num_coeffs {
+    //     gram_mat[(i, i)] += lambda;
+    // }
+    let gram_mat = gram_mat
+        + CsrMatrix::from(&DMatrix::from_diagonal_element(
+            num_coeffs, num_coeffs, lambda,
+        ));
+    println!(
+        "nrows={}, ncols={}, nnz={}",
+        gram_mat.nrows(),
+        gram_mat.ncols(),
+        gram_mat.nnz()
+    );
 
     // Solve
-    let coeffs = gram_mat
-        .qr()
-        .solve(&(a_mat.transpose() * b_vec))
-        .expect("Singular matrix in least squares");
+    println!("Solving...");
+    // let coeffs = gram_mat
+    //     .qr()
+    //     .solve(&(a_mat.transpose() * b_vec))
+    //     .expect("Singular matrix in least squares");
+    let coeffs = conjugate_gradient::solve(&gram_mat, &(a_mat.transpose() * &b_vec), 1000, 1e-5)
+        .expect("CG failed");
+    println!("Residual = {}", (a_mat * &coeffs - &b_vec).norm());
 
     let coeffs: Vec<Vec<Vec<_>>> = coeffs
         .as_slice()
-        .chunks(order + 1)
+        .chunks(num_coeffs_z)
         .map(|coeffs_ij| coeffs_ij.into())
         .collect::<Vec<_>>()
-        .chunks(order + 1)
+        .chunks(num_coeffs_y)
         .map(|coeffs_i| coeffs_i.into())
         .collect();
 
     AdaptiveTransform {
-        scale,
-        origin,
+        knots: (knots_x, knots_y, knots_z),
         coeffs,
     }
 }
@@ -156,162 +178,162 @@ fn target_normals(mesh: &Mesh, center: Vector3<f64>) -> Vec<(Vector3<f64>, Vecto
     target
 }
 
-/// Calculate value of $f(x)=\sum_{i=0}^n w_i b_{i,n}(x)$ where $b_{i,n}(x)$ is a Bernstein basis function
-/// (de Casteljau's algorithm)
-fn bezier(coeffs: &[f64], x: f64) -> f64 {
-    assert!(0.0 <= x && x <= 1.0);
+/// Calculate value of a B-spline $f(x)=\sum_{i=0}^{m-p-1} w_i B_{i,p}(x)$ using de Boor-Cox algorithm
+/// Reference: https://en.wikipedia.org/w/index.php?title=De_Boor%27s_algorithm&oldid=1304012252
+fn bspline(knots: &[f64], coeffs: &[f64], x: f64) -> f64 {
+    let deg = knots.len() - coeffs.len() - 1;
 
-    let mut coeffs: Vec<f64> = coeffs.into();
-    for i in 0..coeffs.len() {
-        for j in 0..(coeffs.len() - i - 1) {
-            coeffs[j] = (1.0 - x) * coeffs[j] + x * coeffs[j + 1];
+    // Find segment x belongs to
+    let k = knots
+        .iter()
+        .position(|knot| *knot > x)
+        .expect("x out of bound")
+        - 1;
+
+    let mut coeffs = coeffs.to_vec();
+    for i in 1..=deg {
+        for j in ((k - deg + i)..=k).rev() {
+            let ratio = (x - knots[j]) / (knots[j + 1 + deg - i] - knots[j]);
+            coeffs[j] = (1.0 - ratio) * coeffs[j - 1] + ratio * coeffs[j];
         }
     }
 
-    coeffs[0]
+    coeffs[k]
 }
 
-fn bezier3d(coeffs: &[Vec<Vec<f64>>], x: f64, y: f64, z: f64) -> f64 {
-    let bezier_i: Vec<_> = coeffs
+/// Calculate derivative of a B-spline through converting it into a B-spline of lower degree
+/// Reference:
+///     https://en.wikipedia.org/w/index.php?title=B-spline&oldid=1303386230#Derivative_expressions
+///     https://pages.mtu.edu/~shene/COURSES/cs3621/NOTES/spline/B-spline/bspline-derv.html
+fn bspline_deriv(knots: &[f64], coeffs: &[f64], x: f64) -> f64 {
+    let deg = knots.len() - coeffs.len() - 1;
+    let new_coeffs: Vec<_> = (0..(coeffs.len() - 1))
+        .map(|i| deg as f64 * (coeffs[i + 1] - coeffs[i]) / (knots[i + deg] - knots[i]))
+        .collect();
+
+    bspline(&knots[1..knots.len() - 2], &new_coeffs, x)
+}
+
+fn bspline3d(
+    knots: &(Vec<f64>, Vec<f64>, Vec<f64>),
+    coeffs: &[Vec<Vec<f64>>],
+    x: f64,
+    y: f64,
+    z: f64,
+) -> f64 {
+    let (knots_x, knots_y, knots_z) = knots;
+
+    let value_i: Vec<_> = coeffs
         .iter()
         .map(|coeffs_i| {
-            let bezier_ij: Vec<_> = coeffs_i
+            let value_ij: Vec<_> = coeffs_i
                 .iter()
-                .map(|coeffs_ij| bezier(coeffs_ij, z))
+                .map(|coeffs_ij| bspline(knots_z, coeffs_ij, z))
                 .collect();
-            bezier(&bezier_ij, y)
+            bspline(knots_y, &value_ij, y)
         })
         .collect();
-    bezier(&bezier_i, x)
+    bspline(knots_x, &value_i, x)
 }
 
-fn bezier3d_dz(coeffs: &[Vec<Vec<f64>>], x: f64, y: f64, z: f64) -> f64 {
-    let mut new_coeffs = Vec::new();
-    for i in 0..coeffs.len() {
-        new_coeffs.push(Vec::new());
-        for j in 0..coeffs[i].len() {
-            new_coeffs[i].push(Vec::new());
-            for k in 0..(coeffs[i][j].len() - 1) {
-                new_coeffs[i][j].push(coeffs[i][j][k + 1] - coeffs[i][j][k]);
-            }
-        }
-    }
+fn bspline3d_dz(
+    knots: &(Vec<f64>, Vec<f64>, Vec<f64>),
+    coeffs: &[Vec<Vec<f64>>],
+    x: f64,
+    y: f64,
+    z: f64,
+) -> f64 {
+    let (knots_x, knots_y, knots_z) = knots;
 
-    (coeffs[0][0].len() as f64) * bezier3d(&new_coeffs, x, y, z)
-}
-
-/// Calculate values of each Bernstein bases $b_{i,n}(x)$ for all $i$ using de Casteljau-like algorithm
-fn bernstein_all(order: usize, x: f64) -> Vec<f64> {
-    let mut values = vec![1.0; order + 1];
-
-    for n in 1..=order {
-        values[n] = x * values[n - 1];
-        for i in (1..n).rev() {
-            values[i] = x * values[i - 1] + (1.0 - x) * values[i];
-        }
-        values[0] = (1.0 - x) * values[0];
-    }
-
-    values
-}
-
-/// Calculate derivatives of each Bernstein bases $b'_{i,n}(x)$
-/// using $b'_{i,n}(x) = n(b_{i-1,n-1}(x)-b_{i,n-1}(x))$
-fn bernstein_deriv_all(order: usize, x: f64) -> Vec<f64> {
-    let low_bases = bernstein_all(order - 1, x);
-    let mut bases_i_minus1 = low_bases.clone();
-    bases_i_minus1.insert(0, 0.0);
-    let mut bases_i = low_bases.clone();
-    bases_i.push(0.0);
-
-    bases_i_minus1
+    let value_i: Vec<_> = coeffs
         .iter()
-        .zip(bases_i.iter())
-        .map(|(b_i_minus1, b_i)| (order as f64) * (b_i_minus1 - b_i))
+        .map(|coeffs_i| {
+            let value_ij: Vec<_> = coeffs_i
+                .iter()
+                .map(|coeffs_ij| bspline_deriv(knots_z, coeffs_ij, z))
+                .collect();
+            bspline(knots_y, &value_ij, y)
+        })
+        .collect();
+    bspline(knots_x, &value_i, x)
+}
+
+fn make_knots(min: f64, max: f64, deg: usize, div: usize) -> Vec<f64> {
+    std::iter::repeat_n(min, deg)
+        .chain((0..=div).map(|i| min + (max - min) * i as f64 / div as f64))
+        .chain(std::iter::repeat_n(max, deg))
         .collect()
 }
 
-fn bezier3d_dx_dw(order: usize, x: f64, y: f64, z: f64) -> Vec<Vec<Vec<f64>>> {
-    let bxs = bernstein_deriv_all(order, x);
-    let bys = bernstein_all(order, y);
-    let bzs = bernstein_all(order, z);
-
-    bxs.iter()
-        .map(|bx| {
-            bys.iter()
-                .map(|by| bzs.iter().map(|bz| bx * by * bz).collect())
-                .collect()
-        })
-        .collect()
+fn bspline_basis(knots: &[f64], i: usize, deg: usize, x: f64) -> f64 {
+    if deg == 0 {
+        if knots[i] <= x && x < knots[i + 1] {
+            1.0
+        } else {
+            0.0
+        }
+    } else {
+        // Avoid division by zero
+        // Reference: https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.BSpline.html
+        let a = if knots[i + deg] == knots[i] {
+            0.0
+        } else {
+            (x - knots[i]) / (knots[i + deg] - knots[i])
+        };
+        let b = if knots[i + deg + 1] == knots[i + 1] {
+            0.0
+        } else {
+            (knots[i + deg + 1] - x) / (knots[i + deg + 1] - knots[i + 1])
+        };
+        a * bspline_basis(knots, i, deg - 1, x) + b * bspline_basis(knots, i + 1, deg - 1, x)
+    }
 }
 
-fn bezier3d_dy_dw(order: usize, x: f64, y: f64, z: f64) -> Vec<Vec<Vec<f64>>> {
-    let bxs = bernstein_all(order, x);
-    let bys = bernstein_deriv_all(order, y);
-    let bzs = bernstein_all(order, z);
-
-    bxs.iter()
-        .map(|bx| {
-            bys.iter()
-                .map(|by| bzs.iter().map(|bz| bx * by * bz).collect())
-                .collect()
-        })
-        .collect()
-}
-
-fn bezier3d_dz_dw(order: usize, x: f64, y: f64, z: f64) -> Vec<Vec<Vec<f64>>> {
-    let bxs = bernstein_all(order, x);
-    let bys = bernstein_all(order, y);
-    let bzs = bernstein_deriv_all(order, z);
-
-    bxs.iter()
-        .map(|bx| {
-            bys.iter()
-                .map(|by| bzs.iter().map(|bz| bx * by * bz).collect())
-                .collect()
-        })
-        .collect()
+fn bspline_basis_deriv(knots: &[f64], i: usize, deg: usize, x: f64) -> f64 {
+    // deg as f64
+    //     * (bspline_basis(knots, i, deg - 1, x) / (knots[i + deg] - knots[i])
+    //         - bspline_basis(knots, i + 1, deg - 1, x) / (knots[i + deg + 1] - knots[i + 1]))
+    // FIXME:
+    let dx = 1e-10;
+    (bspline_basis(knots, i, deg, x + dx) - bspline_basis(knots, i, deg, x)) / dx
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::transform::adaptive::{bernstein_all, bezier, bezier3d};
+    use crate::transform::adaptive::{
+        bspline, bspline3d, bspline_basis, bspline_basis_deriv, bspline_deriv, make_knots,
+    };
 
     #[test]
-    fn test_bezier() {
+    fn test_bspline() {
         let div = 10;
-        let coeffs = [1.0, 2.0, 3.0];
+        let coeffs = [
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+        ];
+        let knots = make_knots(0.0, 1.0, 2, 10);
 
         for i in 0..div {
             let x = i as f64 / div as f64;
             approx::assert_relative_eq!(
-                bezier(&coeffs, x),
-                bezier_direct(&coeffs, x),
+                bspline(&knots, &coeffs, x),
+                bspline_direct(&knots, &coeffs, x),
                 max_relative = 0.1,
             )
         }
     }
 
     #[test]
-    fn test_bezier3d() {
+    fn test_bspline3d() {
         let div = 10;
-        let coeffs = vec![
-            vec![
-                vec![1.0, 2.0, 3.0],
-                vec![3.0, 2.0, 1.0],
-                vec![1.0, 2.0, 3.0],
-            ],
-            vec![
-                vec![3.0, 2.0, 1.0],
-                vec![1.0, 2.0, 3.0],
-                vec![3.0, 2.0, 1.0],
-            ],
-            vec![
-                vec![1.0, 2.0, 3.0],
-                vec![3.0, 2.0, 1.0],
-                vec![1.0, 2.0, 3.0],
-            ],
-        ];
+        let coeffs: Vec<Vec<Vec<f64>>> = (1..=12)
+            .map(|i| {
+                (1..=12)
+                    .map(|j| (1..=12).map(|k| (i * j * k) as f64).collect())
+                    .collect()
+            })
+            .collect();
+        let knots1d = make_knots(0.0, 1.0, 2, 10);
+        let knots = (knots1d.clone(), knots1d.clone(), knots1d.clone());
 
         for i in 0..div {
             let x = i as f64 / div as f64;
@@ -320,8 +342,8 @@ mod tests {
                 for k in 0..div {
                     let z = k as f64 / div as f64;
                     approx::assert_relative_eq!(
-                        bezier3d(&coeffs, x, y, z),
-                        bezier3d_direct(&coeffs, x, y, z),
+                        bspline3d(&knots, &coeffs, x, y, z),
+                        bspline3d_direct(&knots, &coeffs, x, y, z),
                         max_relative = 0.1,
                     )
                 }
@@ -330,68 +352,76 @@ mod tests {
     }
 
     #[test]
-    fn test_bernstein_all() {
+    fn test_bspline_deriv() {
+        let dx = 1e-7;
         let div = 10;
-        let order = 4;
+        let coeffs = [
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+        ];
+        let knots = make_knots(0.0, 1.0, 2, 10);
 
-        for j in 0..div {
-            let x = j as f64 / div as f64;
-            let values = bernstein_all(order, x);
-            assert_eq!(values.len(), order + 1);
-
-            for (i, b) in values.iter().enumerate() {
-                approx::assert_relative_eq!(
-                    *b,
-                    bernstein_direct(i as i32, order as i32, x),
-                    max_relative = 0.1,
-                )
-            }
+        for i in 0..div {
+            let x = i as f64 / div as f64;
+            approx::assert_relative_eq!(
+                bspline_deriv(&knots, &coeffs, x),
+                (bspline(&knots, &coeffs, x + dx) - bspline(&knots, &coeffs, x)) / dx,
+                max_relative = 0.1,
+            )
         }
     }
 
-    fn bezier_direct(coeffs: &[f64], x: f64) -> f64 {
+    #[test]
+    fn test_bspline_basis_deriv() {
+        let dx = 1e-7;
+        let div = 10;
+        let knots = make_knots(0.0, 1.0, 2, 10);
+
+        for i in 0..div {
+            let x = i as f64 / div as f64;
+            // It needs more lax comparison than others
+            approx::assert_abs_diff_eq!(
+                bspline_basis_deriv(&knots, 5, 2, x),
+                (bspline_basis(&knots, 5, 2, x + dx) - bspline_basis(&knots, 5, 2, x)) / dx,
+                epsilon = 1e-4
+            )
+        }
+    }
+
+    fn bspline_direct(knots: &[f64], coeffs: &[f64], x: f64) -> f64 {
+        let deg = knots.len() - coeffs.len() - 1;
+
         let mut sum = 0.0;
         for i in 0..coeffs.len() {
-            sum += coeffs[i] * bernstein_direct(i as i32, coeffs.len() as i32 - 1, x)
+            sum += coeffs[i] * bspline_basis(&knots, i, deg, x);
         }
 
         sum
     }
 
-    fn bezier3d_direct(coeffs: &[Vec<Vec<f64>>], x: f64, y: f64, z: f64) -> f64 {
+    fn bspline3d_direct(
+        knots: &(Vec<f64>, Vec<f64>, Vec<f64>),
+        coeffs: &[Vec<Vec<f64>>],
+        x: f64,
+        y: f64,
+        z: f64,
+    ) -> f64 {
+        let (knots_x, knots_y, knots_z) = knots;
+        let deg_x = knots_x.len() - coeffs.len() - 1;
+        let deg_y = knots_x.len() - coeffs.len() - 1;
+        let deg_z = knots_x.len() - coeffs.len() - 1;
+
         let mut sum = 0.0;
         for i in 0..coeffs.len() {
             for j in 0..coeffs[i].len() {
                 for k in 0..coeffs[i][j].len() {
                     sum += coeffs[i][j][k]
-                        * bernstein_direct(i as i32, coeffs.len() as i32 - 1, x)
-                        * bernstein_direct(j as i32, coeffs[i].len() as i32 - 1, y)
-                        * bernstein_direct(k as i32, coeffs[i][j].len() as i32 - 1, z)
+                        * bspline_basis(knots_x, i, deg_x, x)
+                        * bspline_basis(knots_y, j, deg_y, y)
+                        * bspline_basis(knots_z, k, deg_z, z)
                 }
             }
         }
 
         sum
-    }
-
-    fn bernstein_direct(i: i32, n: i32, x: f64) -> f64 {
-        (binomial(n, i) as f64) * x.powi(i) * (1.0 - x).powi(n - i)
-    }
-
-    fn binomial(n: i32, k: i32) -> u64 {
-        factorial(n) / factorial(k) / factorial(n - k)
-    }
-
-    fn factorial(n: i32) -> u64 {
-        if n <= 1 {
-            1
-        } else {
-            let mut result = 1u64;
-            for i in 2..=n {
-                result *= i as u64;
-            }
-
-            result
-        }
     }
 }

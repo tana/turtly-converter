@@ -1,0 +1,46 @@
+{
+    // IntelliSense を使用して利用可能な属性を学べます。
+    // 既存の属性の説明をホバーして表示します。
+    // 詳細情報は次を確認してください: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+    
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'turtly-converter'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=turtly-converter",
+                    "--package=turtly-converter"
+                ],
+                "filter": {
+                    "name": "turtly-converter",
+                    "kind": "bin"
+                }
+            },
+            "args": ["warp", "./test/BigOverhangTest.stl", "-t", "adaptive", "--visualize"],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'turtly-converter'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=turtly-converter",
+                    "--package=turtly-converter"
+                ],
+                "filter": {
+                    "name": "turtly-converter",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
