@@ -89,9 +89,18 @@ pub fn fit_adaptive(
         b_vec[3 * i + 2] = normal.z - 1.0;
     }
 
+    // Remove w_{i,j,0} which must be 0 in order to make f(x,y,0)=0
+    let mut removed_columns = Vec::new();
+    for i in 0..(order + 1) {
+        for j in 0..(order + 1) {
+            removed_columns.push((i * (order + 1) + j) * (order + 1));
+        }
+    }
+    let a_mat = a_mat.remove_columns_at(&removed_columns);
+
     let mut gram_mat = a_mat.clone().transpose() * a_mat.clone();
     // Add L2-norm regularization
-    for i in 0..num_coeffs {
+    for i in 0..gram_mat.ncols() {
         gram_mat[(i, i)] += lambda;
     }
 
@@ -101,14 +110,21 @@ pub fn fit_adaptive(
         .solve(&(a_mat.transpose() * b_vec))
         .expect("Singular matrix in least squares");
 
-    let coeffs: Vec<Vec<Vec<_>>> = coeffs
+    let mut coeffs: Vec<Vec<Vec<_>>> = coeffs
         .as_slice()
-        .chunks(order + 1)
+        .chunks(order)
         .map(|coeffs_ij| coeffs_ij.into())
         .collect::<Vec<_>>()
         .chunks(order + 1)
         .map(|coeffs_i| coeffs_i.into())
         .collect();
+
+    // Restore w_{i,j,0}
+    for i in 0..(order + 1) {
+        for j in 0..(order + 1) {
+            coeffs[i][j].insert(0, 0.0);
+        }
+    }
 
     AdaptiveTransform {
         scale,
