@@ -1,12 +1,13 @@
-use core::panic;
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
 use na::{vector, Vector3};
-use nalgebra::{self as na, DMatrix, DVector};
+use nalgebra::{self as na, stack, DMatrix, DVector};
 use nalgebra_sparse_linalg::{iteratives::conjugate_gradient, CsrMatrix};
 use serde::{Deserialize, Serialize};
 
 use crate::utils::Mesh;
+
+const RANGE_MARGIN: f64 = 0.1;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AdaptiveTransform {
@@ -41,10 +42,12 @@ pub fn fit_adaptive(
 ) -> AdaptiveTransform {
     let aabb = mesh.calc_aabb();
     let origin = aabb.origin - center;
+    let pos_min = origin - RANGE_MARGIN * aabb.size;
+    let pos_max = origin + (1.0 + RANGE_MARGIN) * aabb.size;
 
-    let knots_x = make_knots(origin.x, origin.x + aabb.size.x, deg, div);
-    let knots_y = make_knots(origin.y, origin.y + aabb.size.y, deg, div);
-    let knots_z = make_knots(origin.z, origin.z + aabb.size.z, deg, div);
+    let knots_x = make_knots(pos_min.x, pos_max.x, deg, div);
+    let knots_y = make_knots(pos_min.y, pos_max.y, deg, div);
+    let knots_z = make_knots(pos_min.z, pos_max.z, deg, div);
 
     let num_coeffs_x = knots_x.len() - deg - 1;
     let num_coeffs_y = knots_y.len() - deg - 1;
@@ -63,66 +66,65 @@ pub fn fit_adaptive(
             let basis_x = bspline_basis(&knots_x, i, deg, point.x);
             let basis_x_dx = bspline_basis_deriv(&knots_x, i, deg, point.x);
 
-            if basis_x.is_nan() { panic!("basis_x is nan") }
-            if basis_x_dx.is_nan() { panic!("basis_x_dx is nan") }
-
             for j in 0..num_coeffs_y {
                 let basis_y = bspline_basis(&knots_y, j, deg, point.y);
                 let basis_y_dy = bspline_basis_deriv(&knots_y, j, deg, point.y);
-
-                if basis_y.is_nan() { panic!("basis_y is nan") }
-                if basis_y_dy.is_nan() { panic!("basis_y_dy is nan") }
 
                 for k in 0..num_coeffs_z {
                     let basis_z = bspline_basis(&knots_z, k, deg, point.z);
                     let basis_z_dz = bspline_basis_deriv(&knots_z, k, deg, point.z);
 
-                    if basis_z.is_nan() { panic!("basis_z is nan") }
-                    if basis_z_dz.is_nan() { panic!("basis_z_dz is nan") }
-
-                    let col = (i * num_coeffs_x + j) * num_coeffs_y + k;
+                    let col = (i * num_coeffs_y + j) * num_coeffs_z + k;
                     // ∂f/∂x = ΣΣΣ w_{i,j,k} b'_{i,p}(x) b_{j,p}(y) b_{k,p}(z)
                     a_mat[(3 * target_idx, col)] = basis_x_dx * basis_y * basis_z;
-                    b_vec[3 * target_idx] = normal.x;
                     // ∂f/∂y = ΣΣΣ w_{i,j,k} b_{i,p}(x) b'_{j,p}(y) b_{k,p}(z)
                     a_mat[(3 * target_idx + 1, col)] = basis_x * basis_y_dy * basis_z;
-                    b_vec[3 * target_idx + 1] = normal.y;
                     // ∂f/∂z = 1 + ΣΣΣ w_{i,j,k} b_{i,p}(x) b_{j,p}(y) b'_{k,p}(z)
                     a_mat[(3 * target_idx + 2, col)] = basis_x * basis_y * basis_z_dz;
-                    b_vec[3 * target_idx + 2] = normal.z - 1.0;
                 }
+            }
+        }
+
+        b_vec[3 * target_idx] = normal.x;
+        b_vec[3 * target_idx + 1] = normal.y;
+        b_vec[3 * target_idx + 2] = normal.z - 1.0;
+    }
+
+    // Fill C and d of constraint equation Cx=d
+    let z0 = origin.z;
+    let mut c_mat = DMatrix::<f64>::zeros(num_coeffs_x * num_coeffs_y * num_coeffs_z, num_coeffs);
+    let mut d_vec = DVector::zeros(num_coeffs_x * num_coeffs_y * num_coeffs_z);
+    for i in 0..num_coeffs_x {
+        for j in 0..num_coeffs_y {
+            for k in 0..num_coeffs_z {
+                // f(x,y,z0) = z0 + ΣΣΣ w_{i,j,k} b_{i,p}(x) b_{j,p}(y) b_{k,p}(z0) = 0
+                c_mat[(
+                    (i * num_coeffs_y + j) * num_coeffs_z + k,
+                    (i * num_coeffs_y + j) * num_coeffs_z + k,
+                )] = bspline_basis(&knots_z, k, deg, z0);
+                d_vec[(i * num_coeffs_y + j) * num_coeffs_z + k] = -z0;
             }
         }
     }
 
-    println!("Sparsify...");
-    let a_mat = CsrMatrix::from(&a_mat);
-
-    let gram_mat = a_mat.transpose() * &a_mat;
+    let mut gram_mat = a_mat.transpose() * &a_mat;
     // Add L2-norm regularization
-    // for i in 0..num_coeffs {
-    //     gram_mat[(i, i)] += lambda;
-    // }
-    let gram_mat = gram_mat
-        + CsrMatrix::from(&DMatrix::from_diagonal_element(
-            num_coeffs, num_coeffs, lambda,
-        ));
-    println!(
-        "nrows={}, ncols={}, nnz={}",
-        gram_mat.nrows(),
-        gram_mat.ncols(),
-        gram_mat.nnz()
-    );
+    for i in 0..num_coeffs {
+        gram_mat[(i, i)] += lambda;
+    }
+
+    let solve_mat = stack![
+        gram_mat, c_mat.transpose();
+        c_mat, 0;
+    ];
+
+    let solve_mat = CsrMatrix::from(&solve_mat);
+    let solve_vec = stack![a_mat.transpose() * b_vec; d_vec];
 
     // Solve
-    println!("Solving...");
-    // let coeffs = gram_mat
-    //     .qr()
-    //     .solve(&(a_mat.transpose() * b_vec))
-    //     .expect("Singular matrix in least squares");
-    let coeffs = conjugate_gradient::solve(&gram_mat, &(a_mat.transpose() * &b_vec), 1000, 1e-5)
-        .expect("CG failed");
-    println!("Residual = {}", (a_mat * &coeffs - &b_vec).norm());
+    let coeffs = conjugate_gradient::solve(&solve_mat, &solve_vec, 5000, 1e-5).expect("CG failed");
+    // Remove Lagrange multipliers
+    let coeffs = coeffs.rows(0, num_coeffs);
 
     let coeffs: Vec<Vec<Vec<_>>> = coeffs
         .as_slice()
@@ -383,6 +385,28 @@ mod tests {
                 bspline_basis_deriv(&knots, 5, 2, x),
                 (bspline_basis(&knots, 5, 2, x + dx) - bspline_basis(&knots, 5, 2, x)) / dx,
                 epsilon = 1e-4
+            )
+        }
+    }
+
+    #[test]
+    fn test_bspline_deriv2() {
+        let div = 10;
+        let coeffs = [
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+        ];
+        let knots = make_knots(0.0, 1.0, 2, 10);
+
+        for i in 0..div {
+            let x = i as f64 / div as f64;
+            approx::assert_relative_eq!(
+                bspline_deriv(&knots, &coeffs, x),
+                coeffs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, w)| w * bspline_basis_deriv(&knots, i, 2, x))
+                    .sum(),
+                max_relative = 0.1,
             )
         }
     }
