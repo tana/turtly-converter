@@ -52,7 +52,7 @@ pub fn fit_adaptive(
     let mut a_mat = DMatrix::zeros(3 * targets.len(), num_coeffs);
     let mut b_vec = DVector::zeros(3 * targets.len());
     for (i, (point, normal)) in targets.iter().enumerate() {
-        let scaled = scale.component_mul(&(point - &origin));
+        let scaled = scale.component_mul(&(point - center - &origin));
 
         // ∂f/∂x = ΣΣΣ w_{i,j,k} s_x b'_{i,n}(s_x x) b_{j,n}(s_y y) b_{k,n}(s_z z)
         let dx_dw = bezier3d_dx_dw(order, scaled.x, scaled.y, scaled.z);
