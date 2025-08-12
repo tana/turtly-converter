@@ -89,7 +89,7 @@ pub fn command_main(args: WarpArgs) -> Result<()> {
             }
         }
         TransformType::Adaptive => {
-            Transform::Adaptive(fit_adaptive(&input_mesh, &center, 2, 10, 1e-12))
+            Transform::Adaptive(fit_adaptive(&input_mesh, &center, 2, 4, 1e-3))
         }
     };
 

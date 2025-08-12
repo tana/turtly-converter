@@ -92,17 +92,17 @@ pub fn fit_adaptive(
 
     // Fill C and d of constraint equation Cx=d
     let z0 = origin.z;
-    let mut c_mat = DMatrix::<f64>::zeros(num_coeffs_x * num_coeffs_y * num_coeffs_z, num_coeffs);
-    let mut d_vec = DVector::zeros(num_coeffs_x * num_coeffs_y * num_coeffs_z);
+    let mut c_mat = DMatrix::<f64>::zeros(num_coeffs_x * num_coeffs_y, num_coeffs);
+    let mut d_vec = DVector::zeros(num_coeffs_x * num_coeffs_y);
     for i in 0..num_coeffs_x {
         for j in 0..num_coeffs_y {
             for k in 0..num_coeffs_z {
                 // f(x,y,z0) = z0 + ΣΣΣ w_{i,j,k} b_{i,p}(x) b_{j,p}(y) b_{k,p}(z0) = 0
                 c_mat[(
-                    (i * num_coeffs_y + j) * num_coeffs_z + k,
+                    i * num_coeffs_y + j,
                     (i * num_coeffs_y + j) * num_coeffs_z + k,
                 )] = bspline_basis(&knots_z, k, deg, z0);
-                d_vec[(i * num_coeffs_y + j) * num_coeffs_z + k] = -z0;
+                d_vec[i * num_coeffs_y + j] = -z0;
             }
         }
     }
