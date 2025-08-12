@@ -144,28 +144,40 @@ pub fn fit_adaptive(
 fn target_normals(mesh: &Mesh, center: Vector3<f64>) -> Vec<(Vector3<f64>, Vector3<f64>)> {
     let mut target = Vec::with_capacity(mesh.triangles.len());
 
+    // Vertex normals
+    let mut vert_normals = vec![Vector3::zeros(); mesh.vertices.len()];
+    // Number of triangles containing the vertex
+    let mut vert_num_tri = vec![0; mesh.vertices.len()];
+    // Calculate vertex normals from triangles
     for tri in mesh.triangles.iter() {
         let [v1, v2, v3] = tri.map(|idx| mesh.vertices[idx]);
-        // Center of the triangle
-        let tri_center = (v1 + v2 + v3) / 3.0;
         // Normal vector of the triangle
         let tri_normal = (v2 - v1).cross(&(v3 - v2)).normalize();
 
-        if (tri_center - center).z < 0.1 {
+        // Vertex normal is the average of the normals of all triangles containing the vertex
+        for &v_idx in tri {
+            vert_normals[v_idx] = (vert_num_tri[v_idx] as f64 * vert_normals[v_idx] + tri_normal)
+                / (vert_num_tri[v_idx] + 1) as f64;
+            vert_num_tri[v_idx] += 1;
+        }
+    }
+
+    for (pos, normal) in mesh.vertices.iter().zip(vert_normals.iter()) {
+        if (pos - center).z < 0.1 {
             // close to the bed, probably bottom surface
             // TODO: variable threshold
             continue;
         }
 
         // Overhang angle (positive means overhang)
-        let angle = tri_normal.z.acos() - FRAC_PI_2;
+        let angle = normal.z.acos() - FRAC_PI_2;
 
         if angle < 0.0 {
             // Ignore non-overhang
             continue;
         }
 
-        let side = Vector3::z().cross(&tri_normal).cross(&Vector3::z());
+        let side = Vector3::z().cross(&normal).cross(&Vector3::z());
         if side.norm() < std::f64::EPSILON {
             continue;
         }
@@ -174,7 +186,7 @@ fn target_normals(mesh: &Mesh, center: Vector3<f64>) -> Vec<(Vector3<f64>, Vecto
         let target_angle = angle.clamp(-FRAC_PI_4, FRAC_PI_4);
         let target_normal = target_angle.cos() * Vector3::z() + target_angle.sin() * side;
 
-        target.push((tri_center, target_normal));
+        target.push((*pos, target_normal));
     }
 
     target
