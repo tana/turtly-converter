@@ -25,6 +25,7 @@ pub fn bspline(knots: &[f64], coeffs: &[f64], x: f64) -> f64 {
 /// Reference:
 ///     https://en.wikipedia.org/w/index.php?title=B-spline&oldid=1303386230#Derivative_expressions
 ///     https://pages.mtu.edu/~shene/COURSES/cs3621/NOTES/spline/B-spline/bspline-derv.html
+#[allow(dead_code)]
 pub fn bspline_deriv(knots: &[f64], coeffs: &[f64], x: f64) -> f64 {
     let deg = knots.len() - coeffs.len() - 1;
     let new_coeffs: Vec<_> = (0..(coeffs.len() - 1))
@@ -32,6 +33,26 @@ pub fn bspline_deriv(knots: &[f64], coeffs: &[f64], x: f64) -> f64 {
         .collect();
 
     bspline(&knots[1..knots.len() - 2], &new_coeffs, x)
+}
+
+/// Calculate integral of a B-spline from the first knot to x
+/// Reference:
+///     C. de Boor, A Practical Guide to Splines, Springer, 1978, pp.127-128.
+pub fn bspline_integ(knots: &[f64], coeffs: &[f64], x: f64) -> f64 {
+    let deg = knots.len() - coeffs.len() - 1;
+    let mut new_coeffs: Vec<_> = Vec::with_capacity(coeffs.len() + 1);
+    let mut coeff = 0.0;
+    new_coeffs.push(0.0);
+    for i in 0..coeffs.len() {
+        coeff += coeffs[i] * (knots[i + deg + 1] - knots[i]) / (deg + 1) as f64;
+        new_coeffs.push(coeff);
+    }
+
+    let mut new_knots = knots.to_vec();
+    new_knots.insert(0, knots[0]);
+    new_knots.push(knots[knots.len() - 1]);
+
+    bspline(&new_knots, &new_coeffs, x)
 }
 
 pub fn bspline3d(
@@ -56,6 +77,7 @@ pub fn bspline3d(
     bspline(knots_x, &value_i, x)
 }
 
+#[allow(dead_code)]
 pub fn bspline3d_dz(
     knots: &(Vec<f64>, Vec<f64>, Vec<f64>),
     coeffs: &[Vec<Vec<f64>>],
@@ -71,6 +93,28 @@ pub fn bspline3d_dz(
             let value_ij: Vec<_> = coeffs_i
                 .iter()
                 .map(|coeffs_ij| bspline_deriv(knots_z, coeffs_ij, z))
+                .collect();
+            bspline(knots_y, &value_ij, y)
+        })
+        .collect();
+    bspline(knots_x, &value_i, x)
+}
+
+pub fn bspline3d_integ_z(
+    knots: &(Vec<f64>, Vec<f64>, Vec<f64>),
+    coeffs: &[Vec<Vec<f64>>],
+    x: f64,
+    y: f64,
+    z: f64,
+) -> f64 {
+    let (knots_x, knots_y, knots_z) = knots;
+
+    let value_i: Vec<_> = coeffs
+        .iter()
+        .map(|coeffs_i| {
+            let value_ij: Vec<_> = coeffs_i
+                .iter()
+                .map(|coeffs_ij| bspline_integ(knots_z, coeffs_ij, z))
                 .collect();
             bspline(knots_y, &value_ij, y)
         })
@@ -118,10 +162,22 @@ pub fn bspline_basis_deriv(knots: &[f64], i: usize, deg: usize, x: f64) -> f64 {
     (bspline_basis(knots, i, deg, x + dx) - bspline_basis(knots, i, deg, x)) / dx
 }
 
+pub fn bspline_basis_integ(knots: &[f64], i: usize, deg: usize, x: f64) -> f64 {
+    // FIXME:
+    let dx = 1e-1;
+
+    let mut integ = 0.0;
+    for j in 0..(((x - knots[0]) / dx).round() as usize) {
+        integ += bspline_basis(&knots, i, deg, j as f64 * dx + knots[0]) * dx;
+    }
+
+    integ
+}
+
 #[cfg(test)]
 mod tests {
     use crate::transform::adaptive::spline::{
-        bspline, bspline3d, bspline_basis, bspline_basis_deriv, bspline_deriv, make_knots,
+        bspline, bspline3d, bspline_basis, bspline_basis_deriv, bspline_deriv, bspline_integ, make_knots
     };
 
     #[test]
@@ -185,6 +241,31 @@ mod tests {
             approx::assert_relative_eq!(
                 bspline_deriv(&knots, &coeffs, x),
                 (bspline(&knots, &coeffs, x + dx) - bspline(&knots, &coeffs, x)) / dx,
+                max_relative = 0.1,
+            )
+        }
+    }
+
+    #[test]
+    fn test_bspline_integ() {
+        let dx = 1e-5;
+        let div = 10;
+        let coeffs = [
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+        ];
+        let knots = make_knots(0.0, 1.0, 2, 10);
+
+        for i in 0..div {
+            let x = i as f64 / div as f64;
+
+            let mut integ = 0.0;
+            for j in 0..((x / dx).round() as usize) {
+                integ += bspline(&knots, &coeffs, j as f64 * dx) * dx;
+            }
+
+            approx::assert_relative_eq!(
+                bspline_integ(&knots, &coeffs, x),
+                integ,
                 max_relative = 0.1,
             )
         }

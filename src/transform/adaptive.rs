@@ -1,18 +1,19 @@
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
 use na::{vector, Vector3};
-use nalgebra::{self as na, stack, DMatrix, DVector};
-use nalgebra_sparse_linalg::{iteratives::conjugate_gradient, CsrMatrix};
+use nalgebra::{self as na, DMatrix, DVector};
+use nalgebra_sparse_linalg::CsrMatrix;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    transform::adaptive::spline::{
-        bspline3d, bspline3d_dz, bspline_basis, bspline_basis_deriv, make_knots,
-    },
+    transform::adaptive::{nnls::nnls, spline::{
+        bspline3d, bspline3d_integ_z, bspline_basis, bspline_basis_deriv, bspline_basis_integ, make_knots
+    }},
     utils::Mesh,
 };
 
 mod spline;
+mod nnls;
 
 const RANGE_MARGIN: f64 = 0.1;
 
@@ -27,7 +28,7 @@ impl AdaptiveTransform {
         vector![
             point.x,
             point.y,
-            point.z + bspline3d(&self.knots, &self.coeffs, point.x, point.y, point.z),
+            point.z + bspline3d_integ_z(&self.knots, &self.coeffs, point.x, point.y, point.z),
         ]
     }
 
@@ -36,7 +37,7 @@ impl AdaptiveTransform {
     }
 
     pub fn jacobian(&self, point: Vector3<f64>) -> f64 {
-        1.0 + bspline3d_dz(&self.knots, &self.coeffs, point.x, point.y, point.z)
+        1.0 + bspline3d(&self.knots, &self.coeffs, point.x, point.y, point.z)
     }
 }
 
@@ -45,7 +46,6 @@ pub fn fit_adaptive(
     center: &Vector3<f64>,
     deg: usize,
     div: usize,
-    lambda: f64,
 ) -> AdaptiveTransform {
     let aabb = mesh.calc_aabb();
     let origin = aabb.origin - center;
@@ -78,15 +78,15 @@ pub fn fit_adaptive(
                 let basis_y_dy = bspline_basis_deriv(&knots_y, j, deg, point.y);
 
                 for k in 0..num_coeffs_z {
-                    let basis_z = bspline_basis(&knots_z, k, deg, point.z);
-                    let basis_z_dz = bspline_basis_deriv(&knots_z, k, deg, point.z);
+                    let basis_z = bspline_basis_integ(&knots_z, k, deg, point.z);
+                    let basis_z_dz = bspline_basis(&knots_z, k, deg, point.z);
 
                     let col = (i * num_coeffs_y + j) * num_coeffs_z + k;
                     // ∂f/∂x = ΣΣΣ w_{i,j,k} b'_{i,p}(x) b_{j,p}(y) b_{k,p}(z)
                     a_mat[(3 * target_idx, col)] = basis_x_dx * basis_y * basis_z;
                     // ∂f/∂y = ΣΣΣ w_{i,j,k} b_{i,p}(x) b'_{j,p}(y) b_{k,p}(z)
                     a_mat[(3 * target_idx + 1, col)] = basis_x * basis_y_dy * basis_z;
-                    // ∂f/∂z = 1 + ΣΣΣ w_{i,j,k} b_{i,p}(x) b_{j,p}(y) b'_{k,p}(z)
+                    // ∂f/∂z = ΣΣΣ w_{i,j,k} b_{i,p}(x) b_{j,p}(y) b'_{k,p}(z)
                     a_mat[(3 * target_idx + 2, col)] = basis_x * basis_y * basis_z_dz;
                 }
             }
@@ -97,41 +97,8 @@ pub fn fit_adaptive(
         b_vec[3 * target_idx + 2] = normal.z - 1.0;
     }
 
-    // Fill C and d of constraint equation Cx=d
-    let z0 = origin.z;
-    let mut c_mat = DMatrix::<f64>::zeros(num_coeffs_x * num_coeffs_y, num_coeffs);
-    let mut d_vec = DVector::zeros(num_coeffs_x * num_coeffs_y);
-    for i in 0..num_coeffs_x {
-        for j in 0..num_coeffs_y {
-            for k in 0..num_coeffs_z {
-                // f(x,y,z0) = z0 + ΣΣΣ w_{i,j,k} b_{i,p}(x) b_{j,p}(y) b_{k,p}(z0) = 0
-                c_mat[(
-                    i * num_coeffs_y + j,
-                    (i * num_coeffs_y + j) * num_coeffs_z + k,
-                )] = bspline_basis(&knots_z, k, deg, z0);
-                d_vec[i * num_coeffs_y + j] = -z0;
-            }
-        }
-    }
-
-    let mut gram_mat = a_mat.transpose() * &a_mat;
-    // Add L2-norm regularization
-    for i in 0..num_coeffs {
-        gram_mat[(i, i)] += lambda;
-    }
-
-    let solve_mat = stack![
-        gram_mat, c_mat.transpose();
-        c_mat, 0;
-    ];
-
-    let solve_mat = CsrMatrix::from(&solve_mat);
-    let solve_vec = stack![a_mat.transpose() * b_vec; d_vec];
-
-    // Solve
-    let coeffs = conjugate_gradient::solve(&solve_mat, &solve_vec, 5000, 1e-5).expect("CG failed");
-    // Remove Lagrange multipliers
-    let coeffs = coeffs.rows(0, num_coeffs);
+    let a_mat = CsrMatrix::from(&a_mat);
+    let coeffs = nnls(&a_mat, &b_vec, 0.1, 5000, 100.0).expect("NNLS did not converge");
 
     let coeffs: Vec<Vec<Vec<_>>> = coeffs
         .as_slice()
