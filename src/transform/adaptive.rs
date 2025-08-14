@@ -1,19 +1,22 @@
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
+use clarabel::{
+    algebra::CscMatrix,
+    solver::{DefaultSettings, DefaultSolver, IPSolver as _, SupportedConeT::NonnegativeConeT},
+};
 use na::{vector, Vector3};
 use nalgebra::{self as na, DMatrix, DVector};
-use nalgebra_sparse_linalg::CsrMatrix;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    transform::adaptive::{nnls::nnls, spline::{
-        bspline3d, bspline3d_integ_z, bspline_basis, bspline_basis_deriv, bspline_basis_integ, make_knots
-    }},
+    transform::adaptive::spline::{
+        bspline3d, bspline3d_integ_z, bspline_basis, bspline_basis_deriv, bspline_basis_integ,
+        make_knots,
+    },
     utils::Mesh,
 };
 
 mod spline;
-mod nnls;
 
 const RANGE_MARGIN: f64 = 0.1;
 
@@ -97,11 +100,28 @@ pub fn fit_adaptive(
         b_vec[3 * target_idx + 2] = normal.z - 1.0;
     }
 
-    let a_mat = CsrMatrix::from(&a_mat);
-    let coeffs = nnls(&a_mat, &b_vec, 0.1, 5000, 100.0).expect("NNLS did not converge");
+    // Convert non-negative least squares into quadratic programming
+    let p_mat = to_clarabel(&(&a_mat.transpose() * &a_mat));
+    let q_vec = (-&a_mat.transpose() * &b_vec).as_slice().to_vec();
+    // Initialize Clarabel solver
+    let mut solver = DefaultSolver::new(
+        &p_mat,
+        &q_vec,
+        &to_clarabel(&-DMatrix::identity(num_coeffs, num_coeffs)),
+        &vec![0.0; num_coeffs],
+        &[NonnegativeConeT(num_coeffs)],
+        DefaultSettings {
+            verbose: false,
+            ..Default::default()
+        },
+    )
+    .expect("Solver initialization failed");
 
-    let coeffs: Vec<Vec<Vec<_>>> = coeffs
-        .as_slice()
+    solver.solve();
+
+    let coeffs: Vec<Vec<Vec<_>>> = solver
+        .solution
+        .x
         .chunks(num_coeffs_z)
         .map(|coeffs_ij| coeffs_ij.into())
         .collect::<Vec<_>>()
@@ -164,4 +184,14 @@ fn target_normals(mesh: &Mesh, center: Vector3<f64>) -> Vec<(Vector3<f64>, Vecto
     }
 
     target
+}
+
+fn to_clarabel(mat: &DMatrix<f64>) -> CscMatrix {
+    // Row-major
+    CscMatrix::from(
+        mat.transpose()
+            .as_slice()
+            .chunks(mat.ncols())
+            .collect::<Vec<_>>(),
+    )
 }
