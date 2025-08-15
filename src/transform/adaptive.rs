@@ -1,4 +1,4 @@
-use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
+use std::f64::consts::FRAC_PI_2;
 
 use clarabel::{
     algebra::CscMatrix,
@@ -137,7 +137,7 @@ pub fn fit_adaptive(
     }
 }
 
-fn target_normals(mesh: &Mesh, center: Vector3<f64>) -> Vec<(Vector3<f64>, Vector3<f64>)> {
+fn target_normals(mesh: &Mesh, _center: Vector3<f64>) -> Vec<(Vector3<f64>, Vector3<f64>)> {
     let mut target = Vec::with_capacity(mesh.triangles.len());
 
     // Vertex normals
@@ -159,19 +159,8 @@ fn target_normals(mesh: &Mesh, center: Vector3<f64>) -> Vec<(Vector3<f64>, Vecto
     }
 
     for (pos, normal) in mesh.vertices.iter().zip(vert_normals.iter()) {
-        if (pos - center).z < 0.1 {
-            // close to the bed, probably bottom surface
-            // TODO: variable threshold
-            continue;
-        }
-
         // Overhang angle (positive means overhang)
         let angle = normal.z.acos() - FRAC_PI_2;
-
-        if angle < 0.0 {
-            // Ignore non-overhang
-            continue;
-        }
 
         let side = Vector3::z().cross(&normal).cross(&Vector3::z());
         if side.norm() < std::f64::EPSILON {
@@ -179,8 +168,7 @@ fn target_normals(mesh: &Mesh, center: Vector3<f64>) -> Vec<(Vector3<f64>, Vecto
         }
         let side = side.normalize();
 
-        let target_angle = angle.clamp(-FRAC_PI_4, FRAC_PI_4);
-        let target_normal = target_angle.cos() * Vector3::z() + target_angle.sin() * side;
+        let target_normal = angle.cos() * Vector3::z() + angle.sin() * side;
 
         target.push((*pos, target_normal));
     }
