@@ -38,7 +38,7 @@ pub fn bspline_deriv(knots: &[f64], coeffs: &[f64], x: f64) -> f64 {
 /// Calculate integral of a B-spline from the first knot to x
 /// Reference:
 ///     C. de Boor, A Practical Guide to Splines, Springer, 1978, pp.127-128.
-pub fn bspline_integ(knots: &[f64], coeffs: &[f64], x: f64) -> f64 {
+pub fn bspline_integ(knots: &[f64], coeffs: &[f64], x0: f64, x: f64) -> f64 {
     let deg = knots.len() - coeffs.len() - 1;
     let mut new_coeffs: Vec<_> = Vec::with_capacity(coeffs.len() + 1);
     let mut coeff = 0.0;
@@ -52,7 +52,7 @@ pub fn bspline_integ(knots: &[f64], coeffs: &[f64], x: f64) -> f64 {
     new_knots.insert(0, knots[0]);
     new_knots.push(knots[knots.len() - 1]);
 
-    bspline(&new_knots, &new_coeffs, x)
+    bspline(&new_knots, &new_coeffs, x) - bspline(&new_knots, &new_coeffs, x0)
 }
 
 pub fn bspline3d(
@@ -103,6 +103,7 @@ pub fn bspline3d_dz(
 pub fn bspline3d_integ_z(
     knots: &(Vec<f64>, Vec<f64>, Vec<f64>),
     coeffs: &[Vec<Vec<f64>>],
+    z0: f64,
     x: f64,
     y: f64,
     z: f64,
@@ -114,7 +115,7 @@ pub fn bspline3d_integ_z(
         .map(|coeffs_i| {
             let value_ij: Vec<_> = coeffs_i
                 .iter()
-                .map(|coeffs_ij| bspline_integ(knots_z, coeffs_ij, z))
+                .map(|coeffs_ij| bspline_integ(knots_z, coeffs_ij, z0, z))
                 .collect();
             bspline(knots_y, &value_ij, y)
         })
@@ -162,12 +163,12 @@ pub fn bspline_basis_deriv(knots: &[f64], i: usize, deg: usize, x: f64) -> f64 {
     (bspline_basis(knots, i, deg, x + dx) - bspline_basis(knots, i, deg, x)) / dx
 }
 
-pub fn bspline_basis_integ(knots: &[f64], i: usize, deg: usize, x: f64) -> f64 {
+pub fn bspline_basis_integ(knots: &[f64], i: usize, deg: usize, x0: f64, x: f64) -> f64 {
     // FIXME:
     let dx = 1e-1;
 
     let mut integ = 0.0;
-    for j in 0..(((x - knots[0]) / dx).round() as usize) {
+    for j in 0..(((x - x0) / dx).round() as usize) {
         integ += bspline_basis(&knots, i, deg, j as f64 * dx + knots[0]) * dx;
     }
 
@@ -177,7 +178,8 @@ pub fn bspline_basis_integ(knots: &[f64], i: usize, deg: usize, x: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use crate::transform::adaptive::spline::{
-        bspline, bspline3d, bspline_basis, bspline_basis_deriv, bspline_deriv, bspline_integ, make_knots
+        bspline, bspline3d, bspline_basis, bspline_basis_deriv, bspline_deriv, bspline_integ,
+        make_knots,
     };
 
     #[test]
@@ -264,7 +266,7 @@ mod tests {
             }
 
             approx::assert_relative_eq!(
-                bspline_integ(&knots, &coeffs, x),
+                bspline_integ(&knots, &coeffs, 0.0, x),
                 integ,
                 max_relative = 0.1,
             )

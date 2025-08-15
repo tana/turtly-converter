@@ -24,6 +24,7 @@ const RANGE_MARGIN: f64 = 0.1;
 pub struct AdaptiveTransform {
     knots: (Vec<f64>, Vec<f64>, Vec<f64>),
     coeffs: Vec<Vec<Vec<f64>>>,
+    origin: Vector3<f64>,
 }
 
 impl AdaptiveTransform {
@@ -31,7 +32,7 @@ impl AdaptiveTransform {
         vector![
             point.x,
             point.y,
-            point.z + bspline3d_integ_z(&self.knots, &self.coeffs, point.x, point.y, point.z),
+            point.z + bspline3d_integ_z(&self.knots, &self.coeffs, self.origin.z, point.x, point.y, point.z),
         ]
     }
 
@@ -81,13 +82,13 @@ pub fn fit_adaptive(
                 let basis_y_dy = bspline_basis_deriv(&knots_y, j, deg, point.y);
 
                 for k in 0..num_coeffs_z {
-                    let basis_z = bspline_basis_integ(&knots_z, k, deg, point.z);
+                    let basis_z = bspline_basis_integ(&knots_z, k, deg, origin.z, point.z);
                     let basis_z_dz = bspline_basis(&knots_z, k, deg, point.z);
 
                     let col = (i * num_coeffs_y + j) * num_coeffs_z + k;
-                    // ∂f/∂x = ΣΣΣ w_{i,j,k} b'_{i,p}(x) b_{j,p}(y) b_{k,p}(z)
+                    // ∂f/∂x = ΣΣΣ w_{i,j,k} b'_{i,p}(x) b_{j,p}(y) (b_{k,p}(z) - b_{k,p}(z0))
                     a_mat[(3 * target_idx, col)] = basis_x_dx * basis_y * basis_z;
-                    // ∂f/∂y = ΣΣΣ w_{i,j,k} b_{i,p}(x) b'_{j,p}(y) b_{k,p}(z)
+                    // ∂f/∂y = ΣΣΣ w_{i,j,k} b_{i,p}(x) b'_{j,p}(y) (b_{k,p}(z) - b_{k,p}(z0))
                     a_mat[(3 * target_idx + 1, col)] = basis_x * basis_y_dy * basis_z;
                     // ∂f/∂z = ΣΣΣ w_{i,j,k} b_{i,p}(x) b_{j,p}(y) b'_{k,p}(z)
                     a_mat[(3 * target_idx + 2, col)] = basis_x * basis_y * basis_z_dz;
@@ -132,6 +133,7 @@ pub fn fit_adaptive(
     AdaptiveTransform {
         knots: (knots_x, knots_y, knots_z),
         coeffs,
+        origin,
     }
 }
 
