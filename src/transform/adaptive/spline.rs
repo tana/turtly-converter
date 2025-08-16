@@ -131,6 +131,8 @@ pub fn make_knots(min: f64, max: f64, deg: usize, div: usize) -> Vec<f64> {
 }
 
 pub fn bspline_basis(knots: &[f64], i: usize, deg: usize, x: f64) -> f64 {
+    let i = i.min(knots.len() - deg - 2);   // For bspline_basis_integ_ind(). FIXME
+
     if deg == 0 {
         if knots[i] <= x && x < knots[i + 1] {
             1.0
@@ -155,31 +157,36 @@ pub fn bspline_basis(knots: &[f64], i: usize, deg: usize, x: f64) -> f64 {
 }
 
 pub fn bspline_basis_deriv(knots: &[f64], i: usize, deg: usize, x: f64) -> f64 {
-    // deg as f64
-    //     * (bspline_basis(knots, i, deg - 1, x) / (knots[i + deg] - knots[i])
-    //         - bspline_basis(knots, i + 1, deg - 1, x) / (knots[i + deg + 1] - knots[i + 1]))
-    // FIXME:
-    let dx = 1e-10;
-    (bspline_basis(knots, i, deg, x + dx) - bspline_basis(knots, i, deg, x)) / dx
+    let a = if knots[i + deg] == knots[i] {
+        0.0
+    } else {
+        bspline_basis(knots, i, deg - 1, x) / (knots[i + deg] - knots[i])
+    };
+    let b = if knots[i + deg + 1] == knots[i + 1] {
+        0.0
+    } else {
+        bspline_basis(knots, i + 1, deg - 1, x) / (knots[i + deg + 1] - knots[i + 1])
+    };
+    deg as f64 * (a - b)
+}
+
+pub fn bspline_basis_integ_ind(knots: &[f64], i: usize, deg: usize, x: f64) -> f64 {
+    let mut sum = 0.0;
+    for j in i..(knots.len() - deg - 1) {
+        sum += (knots[j + deg + 1] - knots[j]) / (deg + 1) as f64
+            * bspline_basis(knots, j, deg + 1, x);
+    }
+    sum
 }
 
 pub fn bspline_basis_integ(knots: &[f64], i: usize, deg: usize, x0: f64, x: f64) -> f64 {
-    // FIXME:
-    let dx = 1e-1;
-
-    let mut integ = 0.0;
-    for j in 0..(((x - x0) / dx).round() as usize) {
-        integ += bspline_basis(&knots, i, deg, j as f64 * dx + knots[0]) * dx;
-    }
-
-    integ
+    bspline_basis_integ_ind(knots, i, deg, x) - bspline_basis_integ_ind(knots, i, deg, x0)
 }
 
 #[cfg(test)]
 mod tests {
     use crate::transform::adaptive::spline::{
-        bspline, bspline3d, bspline_basis, bspline_basis_deriv, bspline_deriv, bspline_integ,
-        make_knots,
+        bspline, bspline3d, bspline_basis, bspline_basis_deriv, bspline_basis_integ, bspline_deriv, bspline_integ, make_knots
     };
 
     #[test]
@@ -285,8 +292,32 @@ mod tests {
             approx::assert_abs_diff_eq!(
                 bspline_basis_deriv(&knots, 5, 2, x),
                 (bspline_basis(&knots, 5, 2, x + dx) - bspline_basis(&knots, 5, 2, x)) / dx,
-                epsilon = 1e-4
+                epsilon = 1e-4,
             )
+        }
+    }
+
+    #[test]
+    fn test_bspline_basis_integ() {
+        let dx = 1e-5;
+        let div = 10;
+        let knots = make_knots(0.0, 1.0, 2, 10);
+
+        for i in 0..div {
+            let x = i as f64 / div as f64;
+
+            let mut integ = 0.0;
+            for j in 0..((x / dx).round() as usize) {
+                integ += bspline_basis(&knots, 5, 2, dx * j as f64) * dx;
+            }
+
+            println!("{} {} {}", x, bspline_basis_integ(&knots, 5, 2, 0.0, x), integ);
+
+            approx::assert_abs_diff_eq!(
+                bspline_basis_integ(&knots, 5, 2, 0.0, x),
+                integ,
+                epsilon = 1e-4
+            );
         }
     }
 
@@ -305,7 +336,7 @@ mod tests {
                 coeffs
                     .iter()
                     .enumerate()
-                    .map(|(i, w)| w * bspline_basis_deriv(&knots, i, 2, x))
+                    .map(|(j, w)| w * bspline_basis_deriv(&knots, j, 2, x))
                     .sum(),
                 max_relative = 0.1,
             )
