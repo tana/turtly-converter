@@ -1,11 +1,11 @@
 use std::f64::consts::FRAC_PI_2;
 
 use clarabel::{
-    algebra::CscMatrix,
     solver::{DefaultSettings, DefaultSolver, IPSolver as _, SupportedConeT::NonnegativeConeT},
 };
 use na::{vector, Vector3};
-use nalgebra::{self as na, DMatrix, DVector};
+use nalgebra::{self as na, DVector};
+use nalgebra_sparse::{CooMatrix, CscMatrix};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -32,7 +32,15 @@ impl AdaptiveTransform {
         vector![
             point.x,
             point.y,
-            point.z + bspline3d_integ_z(&self.knots, &self.coeffs, self.origin.z, point.x, point.y, point.z),
+            point.z
+                + bspline3d_integ_z(
+                    &self.knots,
+                    &self.coeffs,
+                    self.origin.z,
+                    point.x,
+                    point.y,
+                    point.z
+                ),
         ]
     }
 
@@ -69,7 +77,7 @@ pub fn fit_adaptive(
 
     log::info!("Filling matrices...");
     // Fill A and b of Ax=b
-    let mut a_mat = DMatrix::<f64>::zeros(3 * targets.len(), num_coeffs);
+    let mut a_mat = CooMatrix::<f64>::zeros(3 * targets.len(), num_coeffs);
     let mut b_vec = DVector::zeros(3 * targets.len());
     for (target_idx, (point, normal)) in targets.iter().enumerate() {
         let point = point - center;
@@ -78,9 +86,17 @@ pub fn fit_adaptive(
             let basis_x = bspline_basis(&knots_x, i, deg, point.x);
             let basis_x_dx = bspline_basis_deriv(&knots_x, i, deg, point.x);
 
+            if basis_x == 0.0 && basis_x_dx == 0.0 {
+                continue;
+            }
+
             for j in 0..num_coeffs_y {
                 let basis_y = bspline_basis(&knots_y, j, deg, point.y);
                 let basis_y_dy = bspline_basis_deriv(&knots_y, j, deg, point.y);
+
+                if basis_y == 0.0 && basis_y_dy == 0.0 {
+                    continue;
+                }
 
                 for k in 0..num_coeffs_z {
                     let basis_z = bspline_basis_integ(&knots_z, k, deg, origin.z, point.z);
@@ -88,11 +104,11 @@ pub fn fit_adaptive(
 
                     let col = (i * num_coeffs_y + j) * num_coeffs_z + k;
                     // ∂f/∂x = ΣΣΣ w_{i,j,k} b'_{i,p}(x) b_{j,p}(y) (b_{k,p}(z) - b_{k,p}(z0))
-                    a_mat[(3 * target_idx, col)] = basis_x_dx * basis_y * basis_z;
+                    a_mat.push(3 * target_idx, col, basis_x_dx * basis_y * basis_z);
                     // ∂f/∂y = ΣΣΣ w_{i,j,k} b_{i,p}(x) b'_{j,p}(y) (b_{k,p}(z) - b_{k,p}(z0))
-                    a_mat[(3 * target_idx + 1, col)] = basis_x * basis_y_dy * basis_z;
+                    a_mat.push(3 * target_idx + 1, col, basis_x * basis_y_dy * basis_z);
                     // ∂f/∂z = ΣΣΣ w_{i,j,k} b_{i,p}(x) b_{j,p}(y) b'_{k,p}(z)
-                    a_mat[(3 * target_idx + 2, col)] = basis_x * basis_y * basis_z_dz;
+                    a_mat.push(3 * target_idx + 2, col, basis_x * basis_y * basis_z_dz);
                 }
             }
         }
@@ -102,6 +118,8 @@ pub fn fit_adaptive(
         b_vec[3 * target_idx + 2] = normal.z - 1.0;
     }
 
+    let a_mat = CscMatrix::from(&a_mat);
+
     log::info!("Converting into QP...");
     // Convert non-negative least squares into quadratic programming
     let p_mat = to_clarabel(&(&a_mat.transpose() * &a_mat));
@@ -110,7 +128,7 @@ pub fn fit_adaptive(
     let mut solver = DefaultSolver::new(
         &p_mat,
         &q_vec,
-        &to_clarabel(&-DMatrix::identity(num_coeffs, num_coeffs)),
+        &to_clarabel(&-nalgebra_sparse::CscMatrix::identity(num_coeffs)),
         &vec![0.0; num_coeffs],
         &[NonnegativeConeT(num_coeffs)],
         DefaultSettings {
@@ -169,12 +187,12 @@ fn target_normals(mesh: &Mesh, _center: Vector3<f64>) -> Vec<(Vector3<f64>, Vect
     target
 }
 
-fn to_clarabel(mat: &DMatrix<f64>) -> CscMatrix {
-    // Row-major
-    CscMatrix::from(
-        mat.transpose()
-            .as_slice()
-            .chunks(mat.ncols())
-            .collect::<Vec<_>>(),
-    )
+fn to_clarabel(mat: &CscMatrix<f64>) -> clarabel::algebra::CscMatrix {
+    clarabel::algebra::CscMatrix {
+        m: mat.ncols(),
+        n: mat.nrows(),
+        colptr: mat.col_offsets().to_vec(),
+        rowval: mat.row_indices().to_vec(),
+        nzval: mat.values().to_vec(),
+    }
 }
