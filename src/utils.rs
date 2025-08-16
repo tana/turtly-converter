@@ -33,6 +33,29 @@ impl Mesh {
             size: max - min,
         }
     }
+
+    pub fn calc_vert_normals(&self) -> Vec<na::Vector3<f64>> {
+        // Vertex normals
+        let mut vert_normals = vec![na::Vector3::zeros(); self.vertices.len()];
+        // Number of triangles containing the vertex
+        let mut vert_num_tri = vec![0; self.vertices.len()];
+        // Calculate vertex normals from triangles
+        for tri in self.triangles.iter() {
+            let [v1, v2, v3] = tri.map(|idx| self.vertices[idx]);
+            // Normal vector of the triangle
+            let tri_normal = (v2 - v1).cross(&(v3 - v2)).normalize();
+
+            // Vertex normal is the average of the normals of all triangles containing the vertex
+            for &v_idx in tri {
+                vert_normals[v_idx] = (vert_num_tri[v_idx] as f64 * vert_normals[v_idx]
+                    + tri_normal)
+                    / (vert_num_tri[v_idx] + 1) as f64;
+                vert_num_tri[v_idx] += 1;
+            }
+        }
+
+        vert_normals
+    }
 }
 
 impl From<stl_io::IndexedMesh> for Mesh {

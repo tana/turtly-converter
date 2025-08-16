@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{ffi::OsString, fs::File, path::Path};
+use std::{f64::consts::FRAC_PI_2, ffi::OsString, fs::File, path::Path};
 
 use anyhow::Result;
-use clap::Args;
+use clap::{Args, ValueEnum};
 use na::{vector, Vector3};
 use nalgebra as na;
 use ply_rs_bw::ply::{
@@ -26,6 +26,14 @@ const DEFAULT_HEIGHT: f64 = 2.0; // mm
 const DEFAULT_PITCH: f64 = 10.0; // mm
 const DEFAULT_RADIUS: f64 = 100.0; // mm
 const DEFAULT_FLAT_BOTTOM: f64 = 0.0; // mm
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
+enum VisualizationType {
+    /// Z coordinate after transformation
+    PostZ,
+    /// Overhang angle before transformation
+    PreOverhangAngle,
+}
 
 #[derive(Args)]
 pub struct WarpArgs {
@@ -48,8 +56,8 @@ pub struct WarpArgs {
     flat_bottom: f64,
     #[arg(short, long, value_parser = parse_vector)]
     center: Option<Vector3<f64>>,
-    #[arg(long)]
-    visualize: bool,
+    #[arg(long, value_enum)]
+    visualize: Option<VisualizationType>,
 }
 
 pub fn command_main(args: WarpArgs) -> Result<()> {
@@ -88,9 +96,7 @@ pub fn command_main(args: WarpArgs) -> Result<()> {
                 flat_bottom: args.flat_bottom,
             }
         }
-        TransformType::Adaptive => {
-            Transform::Adaptive(fit_adaptive(&input_mesh, &center, 2, 4))
-        }
+        TransformType::Adaptive => Transform::Adaptive(fit_adaptive(&input_mesh, &center, 2, 4)),
     };
 
     let tesselated_mesh = tesselate(input_mesh, args.max_edge_len);
@@ -109,11 +115,11 @@ pub fn command_main(args: WarpArgs) -> Result<()> {
     let mut transform_file_path = input_path.to_owned();
     transform_file_path.set_extension("transform.json");
 
-    if args.visualize {
+    if let Some(viz_type) = args.visualize {
         let mut visualization_file_path = input_path.to_owned();
         visualization_file_path.set_extension("visualization.ply");
 
-        let mut ply = visualize(&tesselated_mesh, &transform, center);
+        let mut ply = visualize(&tesselated_mesh, &transform, center, viz_type);
         let writer = ply_rs_bw::writer::Writer::new();
 
         let mut visualization_file = File::create(visualization_file_path)?;
@@ -158,19 +164,35 @@ fn warp_mesh(input: &Mesh, transform: &Transform, center: Vector3<f64>) -> Mesh 
     }
 }
 
-fn visualize(mesh: &Mesh, transform: &Transform, center: Vector3<f64>) -> Ply<DefaultElement> {
-    // Calculate z coordinates after transform
-    let warped_z: Vec<f64> = mesh
-        .vertices
-        .iter()
-        .map(|pos| transform.apply(pos - center).z)
-        .collect();
-    let warped_z_max = warped_z
+fn visualize(
+    mesh: &Mesh,
+    transform: &Transform,
+    center: Vector3<f64>,
+    viz_type: VisualizationType,
+) -> Ply<DefaultElement> {
+    let val: Vec<_> = match viz_type {
+        VisualizationType::PostZ => {
+            // Calculate z coordinates after transform
+            mesh.vertices
+                .iter()
+                .map(|pos| transform.apply(pos - center).z)
+                .collect()
+        }
+        VisualizationType::PreOverhangAngle => {
+            // Calculate overhang angle (positive means overhang)
+            mesh.calc_vert_normals()
+                .iter()
+                .map(|normal| normal.z.acos() - FRAC_PI_2)
+                .collect()
+        }
+    };
+
+    let val_max = val
         .clone()
         .into_iter()
         .reduce(f64::max)
         .unwrap_or(std::f64::MIN);
-    let warped_z_min = warped_z
+    let val_min = val
         .clone()
         .into_iter()
         .reduce(f64::min)
@@ -214,14 +236,17 @@ fn visualize(mesh: &Mesh, transform: &Transform, center: Vector3<f64>) -> Ply<De
     ));
     ply.header.elements.add(face_element);
 
-    let colormap = colorous::TURBO;
+    let colormap = match viz_type {
+        VisualizationType::PostZ => colorous::TURBO,
+        VisualizationType::PreOverhangAngle => colorous::BROWN_GREEN,
+    };
 
     // Write vertices into PLY
     let vertices = mesh
         .vertices
         .iter()
-        .zip(warped_z.iter())
-        .map(|(pos, warped_z)| {
+        .zip(val.iter())
+        .map(|(pos, val)| {
             let mut vertex = DefaultElement::new();
 
             // Vertex position
@@ -229,9 +254,8 @@ fn visualize(mesh: &Mesh, transform: &Transform, center: Vector3<f64>) -> Ply<De
             vertex.insert("y".into(), Property::Float(pos.y as f32));
             vertex.insert("z".into(), Property::Float(pos.z as f32));
 
-            // Color a vertex based on warped z position
-            let color =
-                colormap.eval_continuous((warped_z - warped_z_min) / (warped_z_max - warped_z_min));
+            // Color a vertex based on calculated value
+            let color = colormap.eval_continuous((val - val_min) / (val_max - val_min));
             vertex.insert("red".into(), Property::UChar(color.r));
             vertex.insert("green".into(), Property::UChar(color.g));
             vertex.insert("blue".into(), Property::UChar(color.b));

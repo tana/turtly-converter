@@ -141,22 +141,7 @@ fn target_normals(mesh: &Mesh, _center: Vector3<f64>) -> Vec<(Vector3<f64>, Vect
     let mut target = Vec::with_capacity(mesh.triangles.len());
 
     // Vertex normals
-    let mut vert_normals = vec![Vector3::zeros(); mesh.vertices.len()];
-    // Number of triangles containing the vertex
-    let mut vert_num_tri = vec![0; mesh.vertices.len()];
-    // Calculate vertex normals from triangles
-    for tri in mesh.triangles.iter() {
-        let [v1, v2, v3] = tri.map(|idx| mesh.vertices[idx]);
-        // Normal vector of the triangle
-        let tri_normal = (v2 - v1).cross(&(v3 - v2)).normalize();
-
-        // Vertex normal is the average of the normals of all triangles containing the vertex
-        for &v_idx in tri {
-            vert_normals[v_idx] = (vert_num_tri[v_idx] as f64 * vert_normals[v_idx] + tri_normal)
-                / (vert_num_tri[v_idx] + 1) as f64;
-            vert_num_tri[v_idx] += 1;
-        }
-    }
+    let vert_normals = mesh.calc_vert_normals();
 
     for (pos, normal) in mesh.vertices.iter().zip(vert_normals.iter()) {
         // Overhang angle (positive means overhang)
