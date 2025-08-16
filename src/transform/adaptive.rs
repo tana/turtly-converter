@@ -67,6 +67,7 @@ pub fn fit_adaptive(
 
     let targets = target_normals(mesh, *center);
 
+    log::info!("Filling matrices...");
     // Fill A and b of Ax=b
     let mut a_mat = DMatrix::<f64>::zeros(3 * targets.len(), num_coeffs);
     let mut b_vec = DVector::zeros(3 * targets.len());
@@ -101,6 +102,7 @@ pub fn fit_adaptive(
         b_vec[3 * target_idx + 2] = normal.z - 1.0;
     }
 
+    log::info!("Converting into QP...");
     // Convert non-negative least squares into quadratic programming
     let p_mat = to_clarabel(&(&a_mat.transpose() * &a_mat));
     let q_vec = (-&a_mat.transpose() * &b_vec).as_slice().to_vec();
@@ -118,7 +120,11 @@ pub fn fit_adaptive(
     )
     .expect("Solver initialization failed");
 
+    log::info!("p_mat {}x{}, nnz={}", p_mat.n, p_mat.m, p_mat.nnz());
+
+    log::info!("Solving...");
     solver.solve();
+    log::info!("Solving finished");
 
     let coeffs: Vec<Vec<Vec<_>>> = solver
         .solution
@@ -138,6 +144,8 @@ pub fn fit_adaptive(
 }
 
 fn target_normals(mesh: &Mesh, _center: Vector3<f64>) -> Vec<(Vector3<f64>, Vector3<f64>)> {
+    log::info!("Generating target normals...");
+
     let mut target = Vec::with_capacity(mesh.triangles.len());
 
     // Vertex normals
