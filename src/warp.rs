@@ -70,6 +70,8 @@ pub fn command_main(args: WarpArgs) -> Result<()> {
         origin.z
     ]);
 
+    let tesselated_mesh = tesselate(input_mesh, args.max_edge_len);
+
     let transform = match args.transform_type {
         TransformType::Conical => {
             // TODO:
@@ -96,10 +98,10 @@ pub fn command_main(args: WarpArgs) -> Result<()> {
                 flat_bottom: args.flat_bottom,
             }
         }
-        TransformType::Adaptive => Transform::Adaptive(fit_adaptive(&input_mesh, &center, 2, 4)),
+        TransformType::Adaptive => {
+            Transform::Adaptive(fit_adaptive(&tesselated_mesh, &center, 2, 4))
+        }
     };
-
-    let tesselated_mesh = tesselate(input_mesh, args.max_edge_len);
 
     let warped_mesh = warp_mesh(&tesselated_mesh, &transform, center);
 

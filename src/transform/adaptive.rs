@@ -104,11 +104,20 @@ pub fn fit_adaptive(
 
                     let col = (i * num_coeffs_y + j) * num_coeffs_z + k;
                     // ∂f/∂x = ΣΣΣ w_{i,j,k} b'_{i,p}(x) b_{j,p}(y) (b_{k,p}(z) - b_{k,p}(z0))
-                    a_mat.push(3 * target_idx, col, basis_x_dx * basis_y * basis_z);
+                    let dfdx = basis_x_dx * basis_y * basis_z;
+                    if dfdx != 0.0 {
+                        a_mat.push(3 * target_idx, col, dfdx);
+                    }
                     // ∂f/∂y = ΣΣΣ w_{i,j,k} b_{i,p}(x) b'_{j,p}(y) (b_{k,p}(z) - b_{k,p}(z0))
-                    a_mat.push(3 * target_idx + 1, col, basis_x * basis_y_dy * basis_z);
+                    let dfdy = basis_x * basis_y_dy * basis_z;
+                    if dfdy != 0.0 {
+                        a_mat.push(3 * target_idx + 1, col, dfdy);
+                    }
                     // ∂f/∂z = ΣΣΣ w_{i,j,k} b_{i,p}(x) b_{j,p}(y) b'_{k,p}(z)
-                    a_mat.push(3 * target_idx + 2, col, basis_x * basis_y * basis_z_dz);
+                    let dfdz = basis_x * basis_y * basis_z_dz;
+                    if dfdz != 0.0 {
+                        a_mat.push(3 * target_idx + 2, col, dfdz);
+                    }
                 }
             }
         }
