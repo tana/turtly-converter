@@ -1,8 +1,13 @@
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
 use anyhow::Result;
-use candle_core::{display, DType, Device, Tensor};
-use candle_nn::{AdamW, Linear, Module, Optimizer, ParamsAdamW, VarBuilder, VarMap};
+use argmin::{
+    core::{observers::ObserverMode, CostFunction, Executor, Gradient},
+    solver::{linesearch::MoreThuenteLineSearch, quasinewton::LBFGS},
+};
+use argmin_observer_slog::SlogLogger;
+use candle_core::{DType, Device, Tensor, Var};
+use candle_nn::{Linear, Module, VarBuilder, VarMap};
 use nalgebra::{vector, DMatrix, DVector, Vector3};
 use serde::{Deserialize, Serialize};
 
@@ -39,39 +44,31 @@ pub fn fit_adaptive(mesh: &Mesh, center: &Vector3<f64>) -> Result<AdaptiveTransf
     let vs = VarBuilder::from_varmap(&varmap, DType::F64, &Device::Cpu);
     let model = TrainableModel::new(vs.clone(), num_hidden)?;
 
-    let mut optimizer = AdamW::new(
-        varmap.all_vars(),
-        ParamsAdamW {
-            lr: 1e-3,
-            ..Default::default()
-        },
-    )?;
+    let problem = Fitting {
+        vars: varmap.all_vars(),
+        model,
+        targets,
+    };
+
+    let init_params = problem.get_params()?;
 
     log::info!("Fitting...");
 
-    let mut last_loss = std::f64::INFINITY;
-    let mut i = 0;
-    loop {
-        let loss_tensor = loss_func(&model, &targets)?;
-        let loss = loss_tensor.to_scalar::<f64>()?;
-        log::debug!("Iteration {}: loss={}", i, loss);
-        if (last_loss - loss).abs() / last_loss < 1e-3 {
-            break;
-        }
-        // if last_loss - loss < 1e-3 {
-        //     break;
-        // }
-
-        last_loss = loss;
-        i += 1;
-
-        optimizer.backward_step(&loss_tensor)?;
-    }
+    let linesearch = MoreThuenteLineSearch::new();
+    let solver = LBFGS::new(linesearch, 5).with_tolerance_cost(1e-3)?;
+    let fit_result = Executor::new(problem, solver)
+        .add_observer(SlogLogger::term(), ObserverMode::Always)
+        .configure(|state| state.param(init_params))
+        .run()?;
 
     log::info!("Fitting completed");
+    log::debug!("{}", fit_result);
+
+    let problem_after = fit_result.problem.get_problem().unwrap();
+    problem_after.set_params(&fit_result.state.best_param.unwrap())?;
 
     Ok(AdaptiveTransform {
-        model: model.into(),
+        model: problem_after.model.into(),
     })
 }
 
@@ -234,4 +231,70 @@ fn loss_func(
     let grad_loss = (1.0 - (grad * target_grad)?.sum(1)?.mean(0)?)?;
 
     Ok(grad_loss)
+}
+
+struct Fitting {
+    vars: Vec<Var>,
+    model: TrainableModel,
+    targets: Vec<(Vector3<f64>, Vector3<f64>)>,
+}
+
+impl Fitting {
+    fn set_params(&self, params: &Vec<f64>) -> Result<()> {
+        let mut p = 0;
+        for var in self.vars.iter() {
+            let n = var.elem_count();
+
+            var.set(&Tensor::from_slice(
+                &params[p..(p + n)],
+                var.shape(),
+                &Device::Cpu,
+            )?)?;
+
+            p += n;
+        }
+
+        Ok(())
+    }
+
+    fn get_params(&self) -> Result<Vec<f64>> {
+        let mut params = Vec::new();
+        for var in self.vars.iter() {
+            params.append(&mut var.flatten_all()?.to_vec1()?);
+        }
+
+        Ok(params)
+    }
+}
+
+impl CostFunction for Fitting {
+    type Param = Vec<f64>;
+
+    type Output = f64;
+
+    fn cost(&self, param: &Self::Param) -> Result<Self::Output> {
+        self.set_params(param)?;
+        Ok(loss_func(&self.model, &self.targets)?.to_scalar()?)
+    }
+}
+
+impl Gradient for Fitting {
+    type Param = Vec<f64>;
+
+    type Gradient = Vec<f64>;
+
+    fn gradient(&self, param: &Self::Param) -> Result<Self::Gradient> {
+        self.set_params(param)?;
+        let loss = loss_func(&self.model, &self.targets)?;
+
+        let grad_store = loss.backward()?;
+
+        let mut grad = Vec::new();
+        for var in self.vars.iter() {
+            let var_grad = grad_store.get(var).expect("Gradient not computed");
+            grad.append(&mut var_grad.flatten_all()?.to_vec1()?);
+        }
+
+        Ok(grad)
+    }
 }

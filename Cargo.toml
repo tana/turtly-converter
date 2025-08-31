@@ -12,6 +12,9 @@ debug = true
 
 [dependencies]
 anyhow = "1.0.75"
+argmin = "0.10.0"
+argmin-math = { version = "0.4.0", features = ["nalgebra_latest"] }
+argmin-observer-slog = "0.1.0"
 candle-core = "0.9.1"
 candle-nn = "0.9.1"
 clap = { version = "4.4.7", features = ["derive"] }
