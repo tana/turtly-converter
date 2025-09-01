@@ -1,7 +1,7 @@
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
 use anyhow::Result;
-use candle_core::{display, DType, Device, Tensor};
+use candle_core::{DType, Device, Tensor};
 use candle_nn::{AdamW, Linear, Module, Optimizer, ParamsAdamW, VarBuilder, VarMap};
 use nalgebra::{vector, DMatrix, DVector, Vector3};
 use serde::{Deserialize, Serialize};
@@ -49,20 +49,15 @@ pub fn fit_adaptive(mesh: &Mesh, center: &Vector3<f64>) -> Result<AdaptiveTransf
 
     log::info!("Fitting...");
 
-    let mut last_loss = std::f64::INFINITY;
     let mut i = 0;
     loop {
         let loss_tensor = loss_func(&model, &targets)?;
         let loss = loss_tensor.to_scalar::<f64>()?;
         log::debug!("Iteration {}: loss={}", i, loss);
-        if (last_loss - loss).abs() / last_loss < 1e-3 {
+        if loss < 0.01 {
             break;
         }
-        // if last_loss - loss < 1e-3 {
-        //     break;
-        // }
 
-        last_loss = loss;
         i += 1;
 
         optimizer.backward_step(&loss_tensor)?;
