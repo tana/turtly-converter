@@ -1,7 +1,7 @@
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
 use anyhow::Result;
-use candle_core::{DType, Device, Tensor};
+use candle_core::{DType, Device, IndexOp, Tensor};
 use candle_nn::{AdamW, Linear, Module, Optimizer, ParamsAdamW, VarBuilder, VarMap};
 use nalgebra::{vector, DMatrix, DVector, Vector3};
 use serde::{Deserialize, Serialize};
@@ -51,10 +51,16 @@ pub fn fit_adaptive(mesh: &Mesh, center: &Vector3<f64>) -> Result<AdaptiveTransf
 
     let mut i = 0;
     loop {
-        let loss_tensor = loss_func(&model, &targets)?;
+        let (loss_tensor, check_loss_tensor) = loss_func(&model, &targets)?;
         let loss = loss_tensor.to_scalar::<f64>()?;
-        log::debug!("Iteration {}: loss={}", i, loss);
-        if loss < 0.01 {
+        let check_loss = check_loss_tensor.to_scalar::<f64>()?;
+        log::debug!(
+            "Iteration {}: loss={:.3}, check_loss={:.3}",
+            i,
+            loss,
+            check_loss
+        );
+        if check_loss < 0.01 {
             break;
         }
 
@@ -184,7 +190,7 @@ impl TrainableModel {
 fn loss_func(
     model: &TrainableModel,
     targets: &[(Vector3<f64>, Vector3<f64>)],
-) -> candle_core::Result<Tensor> {
+) -> candle_core::Result<(Tensor, Tensor)> {
     let target_pos = targets
         .iter()
         .map(|(pos, _)| pos.iter())
@@ -228,5 +234,10 @@ fn loss_func(
     // See: https://docs.pytorch.org/docs/stable/generated/torch.nn.CosineEmbeddingLoss.html
     let grad_loss = (1.0 - (grad * target_grad)?.sum(1)?.mean(0)?)?;
 
-    Ok(grad_loss)
+    let disp = (f - target_pos.i((.., 2)))?;
+    let disp_loss = disp.sqr()?.mean(0)?;
+
+    let total_loss = (&grad_loss + 0.0001 * disp_loss)?;
+
+    Ok((total_loss, grad_loss))
 }
