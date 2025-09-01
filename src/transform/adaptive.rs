@@ -10,6 +10,7 @@ use crate::utils::Mesh;
 
 const DELTA: f64 = 1e-6;
 const ELU_ALPHA: f64 = 1.0;
+const TANH_SCALE: f64 = 1.0;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AdaptiveTransform {
@@ -88,8 +89,8 @@ fn target_normals(mesh: &Mesh, center: &Vector3<f64>) -> Vec<(Vector3<f64>, Vect
         // Overhang angle (positive means overhang)
         let angle = normal.z.acos() - FRAC_PI_2;
 
-        // Ignore non-overhangs
-        if angle < 0.0 {
+        // Ignore non-overhangs and bottom
+        if angle < 0.0 || (pos - center).z < 0.1 {
             continue;
         }
 
@@ -124,8 +125,14 @@ impl Model {
             &(&self.output_weights * hidden_val + &self.output_bias),
             ELU_ALPHA,
         );
-        pos.z + output_val[0]
+        pos.z + tanh(TANH_SCALE * pos.z) * output_val[0]
     }
+}
+
+fn tanh(x: f64) -> f64 {
+    let epx = x.exp();
+    let emx = (-x).exp();
+    (epx - emx) / (epx + emx)
 }
 
 impl From<TrainableModel> for Model {
@@ -186,7 +193,9 @@ impl TrainableModel {
             .forward(&self.hidden_layer.forward(pos)?.elu(ELU_ALPHA)?)?
             .elu(ELU_ALPHA)?;
 
-        Ok((pos.get_on_dim(1, 2)? + nn_out.get_on_dim(1, 0)?)?)
+        let z = pos.get_on_dim(1, 2)?;
+
+        Ok((&z + (TANH_SCALE * &z)?.tanh() * nn_out.get_on_dim(1, 0)?)?)
     }
 }
 
