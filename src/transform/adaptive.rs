@@ -88,9 +88,12 @@ fn target_normals(mesh: &Mesh, center: &Vector3<f64>) -> Vec<(Vector3<f64>, Vect
         // Overhang angle (positive means overhang)
         let angle = normal.z.acos() - FRAC_PI_2;
 
-        if angle < 0.0 || angle > FRAC_PI_4 {
+        // Ignore non-overhangs
+        if angle < 0.0 {
             continue;
         }
+
+        let angle = angle.min(FRAC_PI_4);
 
         let side = Vector3::z().cross(&normal).cross(&Vector3::z());
         if side.norm() < std::f64::EPSILON {
