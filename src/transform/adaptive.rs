@@ -3,11 +3,13 @@ use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 use anyhow::Result;
 use candle_core::{DType, Device, IndexOp, Tensor};
 use candle_nn::{AdamW, Init, Linear, Module, Optimizer, ParamsAdamW, VarBuilder, VarMap};
-use nalgebra::{stack, vector, DMatrix, DVector, Vector3};
+use nalgebra::{dvector, stack, vector, DMatrix, DVector, Vector3};
 use serde::{Deserialize, Serialize};
 
 use crate::utils::Mesh;
 
+const NEWTON_MAX_ITER: usize = 10;
+const NEWTON_TOL: f64 = 0.01;
 const DELTA: f64 = 1e-6;
 const ELU_ALPHA: f64 = 1.0;
 const TANH_SCALE: f64 = 1.0;
@@ -22,12 +24,29 @@ impl AdaptiveTransform {
         vector![point.x, point.y, self.model.evaluate(&point)]
     }
 
-    pub fn apply_inverse(&self, _point: Vector3<f64>) -> Vector3<f64> {
-        todo!()
+    pub fn apply_inverse(&self, point: Vector3<f64>) -> Vector3<f64> {
+        // Solve f(x,y,z)-z'=0 for z using Newton-Raphson method
+        let mut z = point.z;
+        let mut converged = false;
+        for _ in 0..NEWTON_MAX_ITER {
+            let (f, dfdz) = self.model.evaluate_with_dfdz(&vector![point.x, point.y, z]);
+            if (f - point.z).abs() < NEWTON_TOL {
+                converged = true;
+                break;
+            }
+            z -= (f - point.z) / dfdz;
+        }
+
+        if !converged {
+            log::debug!("Newton did not converge after {} iters", NEWTON_MAX_ITER);
+        }
+
+        vector![point.x, point.y, z]
     }
 
     pub fn jacobian(&self, point: Vector3<f64>) -> f64 {
-        todo!()
+        // Because x=x and y=y, Jacobian is equal to ∂f/∂z
+        self.model.evaluate_with_dfdz(&point).1
     }
 }
 
@@ -129,12 +148,23 @@ impl Model {
         let fourier_phase = PI * &self.fourier_mat * pos;
         let fourier_feats = stack![fourier_phase.map(|c| c.cos()); fourier_phase.map(|c| c.sin())];
 
-        let hidden_val = elu(&(&self.hidden_weights * fourier_feats + &self.hidden_bias), ELU_ALPHA);
+        let hidden_val = elu(
+            &(&self.hidden_weights * fourier_feats + &self.hidden_bias),
+            ELU_ALPHA,
+        );
         let output_val = elu(
             &(&self.output_weights * hidden_val + &self.output_bias),
             ELU_ALPHA,
         );
         pos.z + tanh(TANH_SCALE * pos.z) * output_val[0]
+    }
+
+    fn evaluate_with_dfdz(&self, pos: &Vector3<f64>) -> (f64, f64) {
+        // TODO: use analytical or automatic differentiation
+        let f = self.evaluate(pos);
+        let f_dz = self.evaluate(&(pos + dvector![0.0, 0.0, DELTA]));
+        let dfdz = (f_dz - f) / DELTA;
+        (f, dfdz)
     }
 }
 
@@ -193,11 +223,7 @@ struct TrainableModel {
 }
 
 impl TrainableModel {
-    fn new(
-        vs: VarBuilder,
-        num_fourier: usize,
-        num_hidden: usize,
-    ) -> candle_core::Result<Self> {
+    fn new(vs: VarBuilder, num_fourier: usize, num_hidden: usize) -> candle_core::Result<Self> {
         Ok(Self {
             // UNLIKE THE PAPER CITED ABOVE, `fourier_mat` is trained as a parameter.
             fourier_mat: vs.get_with_hints(
@@ -218,17 +244,12 @@ impl TrainableModel {
         let num_fourier = self.fourier_mat.dim(0)?;
 
         // Gaussian Fourier features
-        let fourier_phase = (PI * Tensor::stack(&vec![&self.fourier_mat; n], 0)?
-            .matmul(&Tensor::stack(&[pos], 2)?)?
-            .squeeze(2)?)?;
+        let fourier_phase = (PI
+            * Tensor::stack(&vec![&self.fourier_mat; n], 0)?
+                .matmul(&Tensor::stack(&[pos], 2)?)?
+                .squeeze(2)?)?;
         assert_eq!(*fourier_phase.shape(), (n, num_fourier).into());
-        let fourier_feats = Tensor::cat(
-            &[
-                fourier_phase.cos()?,
-                fourier_phase.sin()?,
-            ],
-            1,
-        )?;
+        let fourier_feats = Tensor::cat(&[fourier_phase.cos()?, fourier_phase.sin()?], 1)?;
         assert_eq!(*fourier_feats.shape(), (n, 2 * num_fourier).into());
 
         let nn_out = self
