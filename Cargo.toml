@@ -17,6 +17,7 @@ candle-nn = "0.9.1"
 clap = { version = "4.4.7", features = ["derive"] }
 colorous = "1.0.16"
 env_logger = "0.11.8"
+indicatif = "0.18.0"
 log = "0.4.27"
 nalgebra = { version = "0.34.0", features = ["serde-serialize"] }
 nom = "7.1.3"

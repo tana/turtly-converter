@@ -3,6 +3,7 @@ use std::f64::consts::{FRAC_PI_2, PI};
 use anyhow::Result;
 use candle_core::{DType, Device, IndexOp, Tensor};
 use candle_nn::{AdamW, Init, Linear, Module, Optimizer, ParamsAdamW, VarBuilder, VarMap};
+use indicatif::{ProgressBar, ProgressStyle};
 use nalgebra::{dvector, stack, vector, DMatrix, DVector, Vector3};
 use serde::{Deserialize, Serialize};
 
@@ -75,19 +76,22 @@ pub fn fit_adaptive(
 
     log::info!("Fitting...");
 
-    for i in 0..num_iter {
-        let (loss_tensor, check_loss_tensor) = loss_func(&model, &targets)?;
+    let progress_bar = ProgressBar::new(num_iter as u64).with_style(
+        ProgressStyle::with_template("Fitting... [{wide_bar}] {pos:>4}/{len:4} {msg}")?
+            .progress_chars("=> "),
+    );
+
+    for _ in 0..num_iter {
+        let (loss_tensor, _) = loss_func(&model, &targets)?;
         let loss = loss_tensor.to_scalar::<f64>()?;
-        let check_loss = check_loss_tensor.to_scalar::<f64>()?;
-        log::debug!(
-            "Iteration {}: loss={:.3}, check_loss={:.3}",
-            i,
-            loss,
-            check_loss
-        );
+
+        progress_bar.inc(1);
+        progress_bar.set_message(format!("loss={:.3}", loss));
 
         optimizer.backward_step(&loss_tensor)?;
     }
+
+    progress_bar.finish();
 
     log::info!("Fitting completed");
 
