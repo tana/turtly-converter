@@ -5,6 +5,7 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::{AdamW, Init, Linear, Module, Optimizer, ParamsAdamW, VarBuilder, VarMap};
 use indicatif::{ProgressBar, ProgressStyle};
 use nalgebra::{dvector, stack, vector, DMatrix, DVector, Vector3};
+use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 
 use crate::utils::Mesh;
@@ -55,6 +56,7 @@ pub fn fit_adaptive(
     mesh: &Mesh,
     center: &Vector3<f64>,
     num_iter: usize,
+    minibatch_size: usize,
     max_angle: f64,
     jacobian_loss_weight: f64,
 ) -> Result<AdaptiveTransform> {
@@ -82,14 +84,25 @@ pub fn fit_adaptive(
             .progress_chars("=> "),
     );
 
+    let mut rng = rand::rng();
+
     for _ in 0..num_iter {
-        let (loss_tensor, _) = loss_func(&model, &targets, jacobian_loss_weight)?;
-        let loss = loss_tensor.to_scalar::<f64>()?;
+        let mut order: Vec<_> = (0..targets.len()).collect();
+        order.shuffle(&mut rng);
+
+        let mut loss = 0.0;
+
+        for minibatch_indices in order.chunks(minibatch_size) {
+            let minibatch: Vec<_> = minibatch_indices.iter().map(|idx| targets[*idx]).collect();
+
+            let (loss_tensor, _) = loss_func(&model, &minibatch, jacobian_loss_weight)?;
+            loss = loss_tensor.to_scalar::<f64>()?;
+
+            optimizer.backward_step(&loss_tensor)?;
+        }
 
         progress_bar.inc(1);
         progress_bar.set_message(format!("loss={:.3}", loss));
-
-        optimizer.backward_step(&loss_tensor)?;
     }
 
     progress_bar.finish();

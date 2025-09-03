@@ -1706,6 +1706,7 @@ dependencies = [
  "nalgebra",
  "nom",
  "ply-rs-bw",
+ "rand",
  "serde",
  "serde_json",
  "stl_io",

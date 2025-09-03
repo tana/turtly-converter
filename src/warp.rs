@@ -27,6 +27,7 @@ const DEFAULT_PITCH: f64 = 10.0; // mm
 const DEFAULT_RADIUS: f64 = 100.0; // mm
 const DEFAULT_FLAT_BOTTOM: f64 = 0.0; // mm
 const DEFAULT_NUM_ITER: usize = 300;
+const DEFAULT_MINIBATCH_SIZE: usize = 100;
 const DEFAULT_MAX_ANGLE: f64 = 45.0; // degrees
 const DEFAULT_JACOBIAN_LOSS_WEIGHT: f64 = 0.01;
 
@@ -63,6 +64,8 @@ pub struct WarpArgs {
     visualize: Option<VisualizationType>,
     #[arg(long, default_value_t = DEFAULT_NUM_ITER)]
     num_iter: usize,
+    #[arg(long, default_value_t = DEFAULT_MINIBATCH_SIZE)]
+    minibatch_size: usize,
     #[arg(long, default_value_t = DEFAULT_MAX_ANGLE)]
     max_angle: f64,
     #[arg(long, default_value_t = DEFAULT_JACOBIAN_LOSS_WEIGHT)]
@@ -110,6 +113,7 @@ pub fn command_main(args: WarpArgs) -> Result<()> {
                 &input_mesh,
                 &center,
                 args.num_iter,
+                args.minibatch_size,
                 args.max_angle * std::f64::consts::PI / 180.0,
                 args.jacobian_loss_weight,
             )
