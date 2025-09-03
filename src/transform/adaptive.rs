@@ -310,7 +310,7 @@ fn loss_func(
     // Normalize gradients
     let norm = grad.sqr()?.sum_keepdim(1)?.sqrt()?;
     assert_eq!(*norm.shape(), (targets.len(), 1).into());
-    let grad = grad.broadcast_div(&norm)?;
+    let grad = (grad / norm.repeat((1, 3))?)?;
 
     // Cosine similarity loss
     // Subtracted from 1 to convert maximization into minimization
