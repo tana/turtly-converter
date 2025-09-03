@@ -1,4 +1,4 @@
-use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+use std::f64::consts::{FRAC_PI_2, PI};
 
 use anyhow::Result;
 use candle_core::{DType, Device, IndexOp, Tensor};
@@ -50,8 +50,13 @@ impl AdaptiveTransform {
     }
 }
 
-pub fn fit_adaptive(mesh: &Mesh, center: &Vector3<f64>) -> Result<AdaptiveTransform> {
-    let targets = target_normals(mesh, center);
+pub fn fit_adaptive(
+    mesh: &Mesh,
+    center: &Vector3<f64>,
+    num_iter: usize,
+    max_angle: f64,
+) -> Result<AdaptiveTransform> {
+    let targets = target_normals(mesh, center, max_angle);
 
     let num_fourier = 10;
     let num_hidden = 100;
@@ -70,8 +75,7 @@ pub fn fit_adaptive(mesh: &Mesh, center: &Vector3<f64>) -> Result<AdaptiveTransf
 
     log::info!("Fitting...");
 
-    let mut i = 0;
-    loop {
+    for i in 0..num_iter {
         let (loss_tensor, check_loss_tensor) = loss_func(&model, &targets)?;
         let loss = loss_tensor.to_scalar::<f64>()?;
         let check_loss = check_loss_tensor.to_scalar::<f64>()?;
@@ -81,11 +85,6 @@ pub fn fit_adaptive(mesh: &Mesh, center: &Vector3<f64>) -> Result<AdaptiveTransf
             loss,
             check_loss
         );
-        if check_loss < 0.01 {
-            break;
-        }
-
-        i += 1;
 
         optimizer.backward_step(&loss_tensor)?;
     }
@@ -97,7 +96,11 @@ pub fn fit_adaptive(mesh: &Mesh, center: &Vector3<f64>) -> Result<AdaptiveTransf
     })
 }
 
-fn target_normals(mesh: &Mesh, center: &Vector3<f64>) -> Vec<(Vector3<f64>, Vector3<f64>)> {
+fn target_normals(
+    mesh: &Mesh,
+    center: &Vector3<f64>,
+    max_angle: f64,
+) -> Vec<(Vector3<f64>, Vector3<f64>)> {
     log::info!("Generating target normals...");
 
     let mut target = Vec::with_capacity(mesh.triangles.len());
@@ -114,7 +117,7 @@ fn target_normals(mesh: &Mesh, center: &Vector3<f64>) -> Vec<(Vector3<f64>, Vect
             continue;
         }
 
-        let angle = angle.min(FRAC_PI_4);
+        let angle = angle.min(max_angle);
 
         let side = Vector3::z().cross(&normal).cross(&Vector3::z());
         if side.norm() < std::f64::EPSILON {

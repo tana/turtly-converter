@@ -26,6 +26,8 @@ const DEFAULT_HEIGHT: f64 = 2.0; // mm
 const DEFAULT_PITCH: f64 = 10.0; // mm
 const DEFAULT_RADIUS: f64 = 100.0; // mm
 const DEFAULT_FLAT_BOTTOM: f64 = 0.0; // mm
+const DEFAULT_NUM_ITER: usize = 300;
+const DEFAULT_MAX_ANGLE: f64 = 45.0; // degrees
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
 enum VisualizationType {
@@ -58,6 +60,10 @@ pub struct WarpArgs {
     center: Option<Vector3<f64>>,
     #[arg(long, value_enum)]
     visualize: Option<VisualizationType>,
+    #[arg(long, default_value_t = DEFAULT_NUM_ITER)]
+    num_iter: usize,
+    #[arg(long, default_value_t = DEFAULT_MAX_ANGLE)]
+    max_angle: f64,
 }
 
 pub fn command_main(args: WarpArgs) -> Result<()> {
@@ -96,9 +102,15 @@ pub fn command_main(args: WarpArgs) -> Result<()> {
                 flat_bottom: args.flat_bottom,
             }
         }
-        TransformType::Adaptive => {
-            Transform::Adaptive(fit_adaptive(&input_mesh, &center).expect("Fitting failed"))
-        }
+        TransformType::Adaptive => Transform::Adaptive(
+            fit_adaptive(
+                &input_mesh,
+                &center,
+                args.num_iter,
+                args.max_angle * std::f64::consts::PI / 180.0,
+            )
+            .expect("Fitting failed"),
+        ),
     };
 
     let tesselated_mesh = tesselate(input_mesh, args.max_edge_len);
