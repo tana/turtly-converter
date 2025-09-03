@@ -10,6 +10,9 @@ license = "MPL-2.0"
 [profile.release]
 debug = true
 
+[features]
+mkl = ["candle-core/mkl", "candle-nn/mkl"]
+
 [dependencies]
 anyhow = "1.0.75"
 candle-core = "0.9.1"
