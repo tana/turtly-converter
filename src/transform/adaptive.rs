@@ -1,7 +1,7 @@
 use std::f64::consts::{FRAC_PI_2, PI};
 
 use anyhow::Result;
-use candle_core::{DType, Device, IndexOp, Tensor};
+use candle_core::{DType, Device, Tensor};
 use candle_nn::{AdamW, Init, Linear, Module, Optimizer, ParamsAdamW, VarBuilder, VarMap};
 use indicatif::{ProgressBar, ProgressStyle};
 use nalgebra::{dvector, stack, vector, DMatrix, DVector, Vector3};
@@ -56,6 +56,7 @@ pub fn fit_adaptive(
     center: &Vector3<f64>,
     num_iter: usize,
     max_angle: f64,
+    jacobian_loss_weight: f64,
 ) -> Result<AdaptiveTransform> {
     let targets = target_normals(mesh, center, max_angle);
 
@@ -82,7 +83,7 @@ pub fn fit_adaptive(
     );
 
     for _ in 0..num_iter {
-        let (loss_tensor, _) = loss_func(&model, &targets)?;
+        let (loss_tensor, _) = loss_func(&model, &targets, jacobian_loss_weight)?;
         let loss = loss_tensor.to_scalar::<f64>()?;
 
         progress_bar.inc(1);
@@ -273,6 +274,7 @@ impl TrainableModel {
 fn loss_func(
     model: &TrainableModel,
     targets: &[(Vector3<f64>, Vector3<f64>)],
+    jacobian_loss_weight: f64,
 ) -> candle_core::Result<(Tensor, Tensor)> {
     let target_pos = targets
         .iter()
@@ -301,7 +303,7 @@ fn loss_func(
     assert_eq!(*dfdy.shape(), targets.len().into());
     let dfdz = ((model.forward(&(&target_pos + dz)?)? - &f)? / DELTA)?;
     assert_eq!(*dfdz.shape(), targets.len().into());
-    let grad = Tensor::stack(&[dfdx, dfdy, dfdz], 1)?;
+    let grad = Tensor::stack(&[&dfdx, &dfdy, &dfdz], 1)?;
     assert_eq!(*grad.shape(), (targets.len(), 3).into());
 
     // Mean Squared Error
@@ -317,10 +319,9 @@ fn loss_func(
     // See: https://docs.pytorch.org/docs/stable/generated/torch.nn.CosineEmbeddingLoss.html
     let grad_loss = (1.0 - (grad * target_grad)?.sum(1)?.mean(0)?)?;
 
-    let disp = (f - target_pos.i((.., 2)))?;
-    let disp_loss = disp.sqr()?.mean(0)?;
+    let jacobian_loss = (&dfdz - Tensor::ones_like(&dfdz))?.sqr()?.mean(0)?;
 
-    let total_loss = (&grad_loss + 0.0001 * disp_loss)?;
+    let total_loss = (&grad_loss + jacobian_loss_weight * jacobian_loss)?;
 
     Ok((total_loss, grad_loss))
 }
