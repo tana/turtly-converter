@@ -30,6 +30,7 @@ const DEFAULT_NUM_ITER: usize = 300;
 const DEFAULT_MINIBATCH_SIZE: usize = 100;
 const DEFAULT_MAX_ANGLE: f64 = 45.0; // degrees
 const DEFAULT_JACOBIAN_LOSS_WEIGHT: f64 = 0.01;
+const DEFAULT_L_INFINITY_LOSS_WEIGHT: f64 = 0.01;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
 enum VisualizationType {
@@ -70,6 +71,8 @@ pub struct WarpArgs {
     max_angle: f64,
     #[arg(long, default_value_t = DEFAULT_JACOBIAN_LOSS_WEIGHT)]
     jacobian_loss_weight: f64,
+    #[arg(long, default_value_t = DEFAULT_L_INFINITY_LOSS_WEIGHT)]
+    l_infinity_loss_weight: f64,
 }
 
 pub fn command_main(args: WarpArgs) -> Result<()> {
@@ -116,6 +119,7 @@ pub fn command_main(args: WarpArgs) -> Result<()> {
                 args.minibatch_size,
                 args.max_angle * std::f64::consts::PI / 180.0,
                 args.jacobian_loss_weight,
+                args.l_infinity_loss_weight,
             )
             .expect("Fitting failed"),
         ),

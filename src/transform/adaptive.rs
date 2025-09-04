@@ -59,6 +59,7 @@ pub fn fit_adaptive(
     minibatch_size: usize,
     max_angle: f64,
     jacobian_loss_weight: f64,
+    l_infinity_loss_weight: f64,
 ) -> Result<AdaptiveTransform> {
     let targets = target_normals(mesh, center, max_angle);
 
@@ -95,7 +96,12 @@ pub fn fit_adaptive(
         for minibatch_indices in order.chunks(minibatch_size) {
             let minibatch: Vec<_> = minibatch_indices.iter().map(|idx| targets[*idx]).collect();
 
-            let (loss_tensor, _) = loss_func(&model, &minibatch, jacobian_loss_weight)?;
+            let (loss_tensor, _) = loss_func(
+                &model,
+                &minibatch,
+                jacobian_loss_weight,
+                l_infinity_loss_weight,
+            )?;
             loss = loss_tensor.to_scalar::<f64>()?;
 
             optimizer.backward_step(&loss_tensor)?;
@@ -288,6 +294,7 @@ fn loss_func(
     model: &TrainableModel,
     targets: &[(Vector3<f64>, Vector3<f64>)],
     jacobian_loss_weight: f64,
+    l_infinity_loss_weight: f64,
 ) -> candle_core::Result<(Tensor, Tensor)> {
     let target_pos = targets
         .iter()
@@ -330,11 +337,14 @@ fn loss_func(
     // Cosine similarity loss
     // Subtracted from 1 to convert maximization into minimization
     // See: https://docs.pytorch.org/docs/stable/generated/torch.nn.CosineEmbeddingLoss.html
-    let grad_loss = (1.0 - (grad * target_grad)?.sum(1)?.mean(0)?)?;
+    let grad_error = (1.0 - (grad * target_grad)?.sum(1)?)?;
+    let grad_loss = grad_error.mean(0)?;
+    let l_infinity_loss = grad_error.max(0)?;
 
     let jacobian_loss = (&dfdz - Tensor::ones_like(&dfdz))?.sqr()?.mean(0)?;
 
-    let total_loss = (&grad_loss + jacobian_loss_weight * jacobian_loss)?;
+    let total_loss = ((&grad_loss + jacobian_loss_weight * jacobian_loss)?
+        + l_infinity_loss_weight * l_infinity_loss)?;
 
     Ok((total_loss, grad_loss))
 }
