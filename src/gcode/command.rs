@@ -100,6 +100,8 @@ macro_rules! def_command {
 def_command!(G0, "Rapid move", x: f64, y: f64, z: f64, c: f64, e: f64, f: f64);
 def_command!(G1, "Linear move", x: f64, y: f64, z: f64, c: f64, e: f64, f: f64);
 def_command!(G92, "Set position", x: f64, y: f64, z: f64, e: f64);
+def_command!(M82, "Absolute E");
+def_command!(M83, "Relative E");
 // There is a 3D printer which use M1001 and M1002 to signal beginning and ending of start/end macros
 //  https://www.ideamaker.io/dictionaryDetail.html?name=End%20of%20Start%20Gcode&category_name=Printer%20Settings
 def_command!(BEGIN_DEWARP, "Enable dewarping", x: f64, y: f64);
@@ -114,6 +116,10 @@ pub enum Command {
     G1(G1),
     #[allow(dead_code)]
     G92(G92),
+    #[allow(dead_code)]
+    M82(M82),
+    #[allow(dead_code)]
+    M83(M83),
     #[allow(dead_code, non_camel_case_types)]
     BEGIN_DEWARP(BEGIN_DEWARP),
     #[allow(dead_code, non_camel_case_types)]

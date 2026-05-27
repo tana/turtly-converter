@@ -3,9 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use core::str::FromStr;
-use nom::character::complete::{
-    char, digit0, digit1, not_line_ending, satisfy, space0,
-};
+use nom::character::complete::{char, digit0, digit1, not_line_ending, satisfy, space0};
 use nom::multi::many0;
 use nom::IResult;
 use nom::{
@@ -18,7 +16,7 @@ use nom::{
     Err,
 };
 
-use super::command::{Command, BEGIN_DEWARP, END_DEWARP, G0, G1, G92};
+use super::command::{Command, BEGIN_DEWARP, END_DEWARP, G0, G1, G92, M82, M83};
 
 pub(crate) fn parse_float_arg(input: &str) -> IResult<&str, f64> {
     map(
@@ -51,6 +49,8 @@ fn parse_command(input: &str) -> IResult<&str, Command> {
         "G0" => map(G0::parse_args, Command::G0)(cmd_rest),
         "G1" => map(G1::parse_args, Command::G1)(cmd_rest),
         "G92" => map(G92::parse_args, Command::G92)(cmd_rest),
+        "M82" => map(M82::parse_args, Command::M82)(cmd_rest),
+        "M83" => map(M83::parse_args, Command::M83)(cmd_rest),
         "BEGIN_DEWARP" => map(BEGIN_DEWARP::parse_args, Command::BEGIN_DEWARP)(cmd_rest),
         "END_DEWARP" => map(END_DEWARP::parse_args, Command::END_DEWARP)(cmd_rest),
         _ => IResult::Err(Err::Error(Error::new(input, ErrorKind::Alpha))), // TODO:

@@ -78,29 +78,32 @@ fn dewarp_gcode(
     let mut center = Vector3::zeros();
     let mut last_pos = Vector4::zeros();
     let mut corrected_e = 0.0;
+    let mut relative_e = false;
 
     for line in BufReader::new(input_file).lines() {
         let line = line?;
 
         if let Ok((_, Some(cmd))) = parse_line(&line) {
             match cmd {
-                Command::G0(G0 { x, y, z, e, .. })
-                | Command::G1(G1 { x, y, z, e, .. }) => {
+                Command::G0(G0 { x, y, z, e, .. }) | Command::G1(G1 { x, y, z, e, .. }) => {
                     let pos = vector![
                         x.unwrap_or(last_pos.x),
                         y.unwrap_or(last_pos.y),
                         z.map(|z| if enabled { z + z_offset } else { z })
                             .unwrap_or(last_pos.z),
-                        e.unwrap_or(last_pos[3])
+                        e.unwrap_or(if relative_e { 0.0 } else { last_pos[3] })
                     ];
 
                     if enabled {
-                        let mut last_e = last_pos[3];
+                        let mut last_e = if relative_e { 0.0 } else { last_pos[3] };
                         // Split movement into short parts because it may be nonlinear after dewarping
                         for p in interpolate(&last_pos, &pos, max_line_len) {
                             let dewarped = dewarp_point(p.xyz(), transform, center);
+                            let e_advance = p[3] - last_e;
                             // Correct extrusion length using the inverse of Jacobian determinant
-                            corrected_e += (p[3] - last_e) / extrusion_correction(p.xyz(), transform, center);
+                            let corrected_e_advance =
+                                e_advance / extrusion_correction(p.xyz(), transform, center);
+                            corrected_e += corrected_e_advance;
                             last_e = p[3];
 
                             let z = dewarped.z.max(0.0); // Workaround for initial moves
@@ -112,7 +115,11 @@ fn dewarp_gcode(
                                         x: Some(dewarped.x),
                                         y: Some(dewarped.y),
                                         z: Some(z),
-                                        e: Some(corrected_e),
+                                        e: Some(if relative_e {
+                                            corrected_e_advance
+                                        } else {
+                                            corrected_e
+                                        }),
                                         ..cmd.clone()
                                     })
                                     .to_string()
@@ -124,12 +131,16 @@ fn dewarp_gcode(
                                         x: Some(dewarped.x),
                                         y: Some(dewarped.y),
                                         z: Some(z),
-                                        e: Some(corrected_e),
+                                        e: Some(if relative_e {
+                                            corrected_e_advance
+                                        } else {
+                                            corrected_e
+                                        }),
                                         ..cmd.clone()
                                     })
                                     .to_string()
                                 )?,
-                                _ => unreachable!()
+                                _ => unreachable!(),
                             }
                         }
                     } else {
@@ -155,6 +166,14 @@ fn dewarp_gcode(
                     writeln!(&mut writer, "{}", line)?;
 
                     last_pos = pos;
+                }
+                Command::M82(_) => {
+                    relative_e = false;
+                    writeln!(&mut writer, "{}", line)?;
+                }
+                Command::M83(_) => {
+                    relative_e = true;
+                    writeln!(&mut writer, "{}", line)?;
                 }
                 Command::BEGIN_DEWARP(BEGIN_DEWARP { x, y }) => {
                     enabled = true;
