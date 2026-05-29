@@ -1,3 +1,7 @@
+> [!TIP]
+> This project is moved to [Codeberg](https://codeberg.org/tana_ash/turtly-converter).
+> This repository will no longer updated.
+
 # 🐢⚗️turtly-converter
 **turtly-converter** is a model preprocessor / G-code postprocessor for **non-planar 3D printing**.
 
